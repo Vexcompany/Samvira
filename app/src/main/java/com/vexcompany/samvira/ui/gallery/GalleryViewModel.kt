@@ -7,6 +7,7 @@ import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaRepository
 import com.vexcompany.samvira.domain.media.MediaResult
 import com.vexcompany.samvira.domain.media.MediaViewGrant
+import com.vexcompany.samvira.domain.media.MediaType
 import com.vexcompany.samvira.domain.org.OrganizationSelection
 import com.vexcompany.samvira.domain.org.OrganizationSelectionStore
 import java.util.concurrent.ConcurrentHashMap
@@ -73,7 +74,6 @@ class GalleryViewModel(
     }
 
     fun setMode(mode: GalleryMode) = _uiState.updateReady { it.copy(mode = mode) }
-
     fun setSearchQuery(query: String) = _uiState.updateReady { it.copy(searchQuery = query) }
 
     fun loadThumbnail(mediaId: String) {
@@ -105,9 +105,13 @@ class GalleryViewModel(
             when (val grant = mediaRepository.requestView(session.token, organizationId, item.mediaId)) {
                 is MediaResult.Success -> {
                     _uiState.updateReady { it.copy(selectedGrant = grant.value) }
-                    when (val content = mediaRepository.fetchContent(session.token, organizationId, item.mediaId, grant.value.accessToken)) {
-                        is MediaResult.Success -> _uiState.updateReady { it.copy(selectedContent = content.value, loadingContent = false) }
-                        is MediaResult.Failure -> _uiState.updateReady { it.copy(loadingContent = false) }
+                    if (item.type == MediaType.VIDEO) {
+                        _uiState.updateReady { it.copy(loadingContent = false) }
+                    } else {
+                        when (val content = mediaRepository.fetchContent(session.token, organizationId, item.mediaId, grant.value.accessToken)) {
+                            is MediaResult.Success -> _uiState.updateReady { it.copy(selectedContent = content.value, loadingContent = false) }
+                            is MediaResult.Failure -> _uiState.updateReady { it.copy(loadingContent = false) }
+                        }
                     }
                 }
                 is MediaResult.Failure -> _uiState.updateReady { it.copy(loadingContent = false) }
