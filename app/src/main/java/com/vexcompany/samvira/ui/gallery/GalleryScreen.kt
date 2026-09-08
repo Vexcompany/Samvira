@@ -14,15 +14,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -79,29 +77,21 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
             ) { padding ->
                 GalleryContent(state, padding, viewModel)
             }
-            state.selected?.let { selected ->
-                MediaDetailDialog(state, selected, viewModel)
-            }
+            state.selected?.let { selected -> MediaDetailDialog(state, selected, viewModel) }
         }
     }
 }
 
 @Composable
-private fun GalleryContent(
-    state: GalleryUiState.Ready,
-    padding: PaddingValues,
-    viewModel: GalleryViewModel,
-) {
+private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val query = state.searchQuery.trim().lowercase(Locale.ROOT)
     val filtered = state.items.filter { item ->
         query.isEmpty() || item.mediaId.lowercase(Locale.ROOT).contains(query) || item.mimeType.lowercase(Locale.ROOT).contains(query)
     }
-
     if (filtered.isEmpty()) {
         CenteredMessage(padding) { Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.") }
         return
     }
-
     when (state.mode) {
         GalleryMode.GALLERY -> MediaGrid(filtered, state, padding, viewModel)
         GalleryMode.TIMELINE -> Timeline(filtered, state, padding, viewModel)
@@ -130,7 +120,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
             item(key = "header-$day") {
                 Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp))
             }
-            item(key = "grid-$day") { MediaGrid(dayItems, state, PaddingValues(0.dp), viewModel) }
+            item(key = "media-$day") { MediaRows(dayItems, state, viewModel) }
         }
     }
 }
@@ -142,9 +132,9 @@ private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding:
         albums.forEach { (month, monthItems) ->
             item(key = "album-$month") {
                 Column {
-                    Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
-                    Text("${monthItems.size} items", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
-                    MediaGrid(monthItems.take(9), state, PaddingValues(0.dp), viewModel)
+                    Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("${monthItems.size} items", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp))
+                    MediaRows(monthItems.take(9), state, viewModel)
                 }
             }
         }
@@ -152,11 +142,23 @@ private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding:
 }
 
 @Composable
-private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel) {
+private fun MediaRows(items: List<MediaItem>, state: GalleryUiState.Ready, viewModel: GalleryViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        items.chunked(3).forEach { rowItems ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                rowItems.forEach { item -> MediaTile(item, state, viewModel, Modifier.weight(1f)) }
+                repeat(3 - rowItems.size) { Box(Modifier.weight(1f).aspectRatio(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel, modifier: Modifier = Modifier) {
     androidx.compose.runtime.LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
     val bitmap = state.thumbnails[item.mediaId]?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .clip(MaterialTheme.shapes.small)
@@ -178,6 +180,8 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
 private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, viewModel: GalleryViewModel) {
     val bytes = state.selectedContent
     val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    val thumbnailBytes = state.thumbnails[item.mediaId]
+    val thumbnail = thumbnailBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     AlertDialog(
         onDismissRequest = viewModel::closeMedia,
         confirmButton = {},
@@ -187,9 +191,8 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                 when {
                     state.loadingContent -> CircularProgressIndicator()
                     bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
-                    item.type == MediaType.VIDEO && state.thumbnails[item.mediaId] != null -> {
-                        val thumb = BitmapFactory.decodeByteArray(state.thumbnails[item.mediaId], 0, state.thumbnails[item.mediaId]!!.size)?.asImageBitmap()
-                        if (thumb != null) Image(thumb, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
+                    item.type == MediaType.VIDEO && thumbnail != null -> {
+                        Image(thumbnail, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
                         Text("Video preview", modifier = Modifier.padding(top = 8.dp))
                     }
                     else -> Text("Media preview is unavailable.")
