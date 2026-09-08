@@ -9,6 +9,7 @@ import com.vexcompany.samvira.data.auth.SessionStore
 import com.vexcompany.samvira.data.identity.DataStoreInstallationIdentityStore
 import com.vexcompany.samvira.data.identity.InstallationIdentityStore
 import com.vexcompany.samvira.data.media.RemoteMediaRepository
+import com.vexcompany.samvira.data.media.ThumbnailCache
 import com.vexcompany.samvira.data.network.NetworkClient
 import com.vexcompany.samvira.data.network.OkHttpNetworkClient
 import com.vexcompany.samvira.data.remote.HttpRemoteClient
@@ -37,6 +38,6 @@ class AppContainer(context: Context) {
     val identityRepository: InstallationIdentityRepository by lazy { DefaultInstallationIdentityRepository(keyStore = installKeyStore, identityStore = identityStore) }
     val authRepository: AuthRepository by lazy { DefaultAuthRepository(identityRepository = identityRepository, keyStore = installKeyStore, remoteClient = remoteClient, sessionStore = sessionStore) }
     val organizationRepository: OrganizationRepository by lazy { DefaultOrganizationRepository(sessionStore = sessionStore, remoteClient = remoteClient) }
-    val mediaRepository: MediaRepository by lazy { RemoteMediaRepository(remoteClient) }
+    val mediaRepository: MediaRepository by lazy { RemoteMediaRepository(remoteClient, ThumbnailCache(appContext)) }
     val organizationSelection: OrganizationSelectionStore = OrganizationSelectionStore()
 }
