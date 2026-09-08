@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration (contains machine-specific paths)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Android build output
+/app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Keystore / signing (never commit)
+*.jks
+*.keystore
+
+# Logs
+*.log
