@@ -1,0 +1,14 @@
+{
+  "name": "samvira-backend",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal SAMVIRA backend: installation identity, proof-of-possession, sessions, and organization membership.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "NODE_NO_WARNINGS=1 node --test"
+  }
+}

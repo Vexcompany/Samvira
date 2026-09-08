@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Backend connectivity (installation registration / proof-of-possession). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!--
       Privacy by default: backups are disabled so installation identity and
       any future session material are never extracted via adb backup or cloud

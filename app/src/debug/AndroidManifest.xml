@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Debug overlay: allow cleartext HTTP to the local dev backend only. -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+
+</manifest>
