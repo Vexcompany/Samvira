@@ -72,3 +72,36 @@ test('media content requires the issued view token', async () => {
     assert.equal(await allowed.text(), 'image-bytes');
   } finally { await ctx.close(); }
 });
+
+test('failed upstream media stream is contained after response starts', async () => {
+  const source = 'https://drive.internal/media/broken';
+  const provider = {
+    async listMedia() {
+      return [{ media_id: 'broken', type: 'PHOTO', mime_type: 'image/jpeg', width: 10, height: 10, duration_ms: null, created_at_epoch_ms: 1700000000000, thumbnail_url: null, source_url: source }];
+    },
+    async openMedia(url) {
+      assert.equal(url, source);
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('partial'));
+          controller.error(new Error('upstream boom'));
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    },
+  };
+  const ctx = await startServer({ provider });
+  const keyPair = generateKeyPair();
+  const auth = await registerAndVerify(ctx.base, { installationId: 'broken-inst', keyPair });
+  ctx.storage.createOrganization('org-1', 'Test Org', Date.now());
+  ctx.storage.addMembership('broken-inst', 'org-1', 'ACTIVE', Date.now());
+  try {
+    const grant = await post(ctx.base, '/api/v1/media/broken/view', {}, { Authorization: `Bearer ${auth.verify.body.session_token}`, 'X-Organization-Id': 'org-1' });
+    assert.equal(grant.status, 200);
+    const response = await fetch(`${ctx.base}${grant.body.content_url}`, { headers: { Authorization: `Bearer ${auth.verify.body.session_token}`, 'X-Organization-Id': 'org-1', 'X-Media-View-Token': grant.body.access_token } });
+    assert.equal(response.status, 200);
+    await assert.rejects(() => response.arrayBuffer());
+    const health = await fetch(`${ctx.base}/healthz`);
+    assert.equal(health.status, 200);
+  } finally { await ctx.close(); }
+});
