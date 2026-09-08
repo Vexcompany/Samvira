@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -34,10 +36,23 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Fail closed: there is intentionally no default production
-            // endpoint. A release build refuses to run until a real backend
-            // base URL is configured.
-            buildConfigField("String", "API_BASE_URL", "\"\"")
+
+            // Production releases must be built with an explicit HTTPS backend.
+            // Accepted sources: -PsamviraApiBaseUrl=... or SAMVIRA_API_BASE_URL.
+            val configuredApiBaseUrl = providers.gradleProperty("samviraApiBaseUrl")
+                .orElse(providers.environmentVariable("SAMVIRA_API_BASE_URL"))
+                .orElse("")
+                .get()
+                .trim()
+            require(configuredApiBaseUrl.isNotEmpty()) {
+                "Release builds require -PsamviraApiBaseUrl=https://... or SAMVIRA_API_BASE_URL"
+            }
+            val parsedApiBaseUrl = runCatching { URI(configuredApiBaseUrl) }.getOrNull()
+            require(parsedApiBaseUrl?.scheme == "https" && parsedApiBaseUrl.host != null) {
+                "Release API base URL must be an absolute HTTPS URL"
+            }
+            val escapedApiBaseUrl = configuredApiBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")
+            buildConfigField("String", "API_BASE_URL", "\"$escapedApiBaseUrl\"")
         }
     }
 
