@@ -8,6 +8,8 @@ sealed interface MediaResult<out T> {
 interface MediaRepository {
     suspend fun listMedia(sessionToken: String, organizationId: String): MediaResult<List<MediaItem>>
     suspend fun requestView(sessionToken: String, organizationId: String, mediaId: String): MediaResult<MediaViewGrant>
+    suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray>
+    suspend fun fetchContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): MediaResult<ByteArray>
 }
 
 data class MediaViewGrant(
