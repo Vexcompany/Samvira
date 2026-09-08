@@ -32,6 +32,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +41,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaType
 import com.vexcompany.samvira.security.ScreenGuard
@@ -57,30 +57,30 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
         onDispose { (context as? Activity)?.let(ScreenGuard::disable) }
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    when (state) {
+    when (val currentState = state) {
         GalleryUiState.Loading -> CenteredMessage { CircularProgressIndicator() }
-        is GalleryUiState.Error -> CenteredMessage { Text(state.message ?: state.code, color = MaterialTheme.colorScheme.error) }
+        is GalleryUiState.Error -> CenteredMessage { Text(currentState.message ?: currentState.code, color = MaterialTheme.colorScheme.error) }
         is GalleryUiState.Ready -> {
             Scaffold(
                 topBar = {
                     Column {
                         TopAppBar(title = { Text("Gallery", fontWeight = FontWeight.SemiBold) })
                         OutlinedTextField(
-                            value = state.searchQuery,
+                            value = currentState.searchQuery,
                             onValueChange = viewModel::setSearchQuery,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                             singleLine = true,
                             label = { Text("Search photos and videos") },
                         )
-                        ScrollableTabRow(selectedTabIndex = state.mode.ordinal) {
+                        ScrollableTabRow(selectedTabIndex = currentState.mode.ordinal) {
                             GalleryMode.entries.forEach { mode ->
-                                Tab(selected = state.mode == mode, onClick = { viewModel.setMode(mode) }, text = { Text(mode.label()) })
+                                Tab(selected = currentState.mode == mode, onClick = { viewModel.setMode(mode) }, text = { Text(mode.label()) })
                             }
                         }
                     }
                 },
-            ) { padding -> GalleryContent(state, padding, viewModel) }
-            state.selected?.let { selected -> MediaDetailDialog(state, selected, viewModel) }
+            ) { padding -> GalleryContent(currentState, padding, viewModel) }
+            currentState.selected?.let { selected -> MediaDetailDialog(currentState, selected, viewModel) }
         }
     }
 }
