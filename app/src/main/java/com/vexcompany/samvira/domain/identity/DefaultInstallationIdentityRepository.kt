@@ -4,14 +4,12 @@ import com.vexcompany.samvira.data.identity.InstallationIdentityRecord
 import com.vexcompany.samvira.data.identity.InstallationIdentityStore
 import com.vexcompany.samvira.security.keystore.InstallKeyStore
 import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
- * Orchestrates installation identity between the Android Keystore (key
- * material) and local persistence (random identifier + creation time).
- *
- * Public-key material is always read back from the Keystore; the store only
- * persists the non-secret identifier and timestamp, so the two layers never
- * need to agree on secret data.
+ * Orchestrates installation identity between Android Keystore key material and
+ * local persistence of the random identifier and creation time.
  */
 class DefaultInstallationIdentityRepository(
     private val keyStore: InstallKeyStore,
@@ -20,25 +18,31 @@ class DefaultInstallationIdentityRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : InstallationIdentityRepository {
 
-    override suspend fun currentIdentity(): InstallationIdentity {
-        val stored = identityStore.load()
-        val publicKey = keyStore.publicKey()
+    // Serializes first-use provisioning so concurrent callers cannot mint
+    // multiple identifiers or race key creation for the same installation.
+    private val provisioningMutex = Mutex()
 
-        if (stored != null && publicKey != null) {
-            return stored.toIdentity(publicKey)
+    override suspend fun currentIdentity(): InstallationIdentity =
+        provisioningMutex.withLock {
+            val stored = identityStore.load()
+            val publicKey = keyStore.publicKey()
+
+            if (stored != null && publicKey != null) {
+                return@withLock stored.toIdentity(publicKey)
+            }
+
+            // First launch, or key/metadata became inconsistent. Reuse an
+            // existing key when possible and create fresh metadata. If either
+            // provisioning or persistence fails, the exception propagates and
+            // no partial identity is returned to the caller.
+            val pem = keyStore.ensureKey()
+            val record = InstallationIdentityRecord(
+                installationId = idGenerator(),
+                createdAtEpochMs = clock(),
+            )
+            identityStore.save(record)
+            record.toIdentity(pem)
         }
-
-        // First launch, or the key/metadata pair became inconsistent
-        // (e.g. app data was cleared but the Keystore entry survived).
-        // Provision (or reuse) the key and persist a fresh identifier.
-        val pem = keyStore.ensureKey()
-        val record = InstallationIdentityRecord(
-            installationId = idGenerator(),
-            createdAtEpochMs = clock(),
-        )
-        identityStore.save(record)
-        return record.toIdentity(pem)
-    }
 }
 
 private fun InstallationIdentityRecord.toIdentity(publicKeyPem: String) = InstallationIdentity(

@@ -3,6 +3,8 @@ package com.vexcompany.samvira.data.network
 import com.vexcompany.samvira.core.logging.AppLogger
 import com.vexcompany.samvira.core.logging.Scrubber
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,9 +16,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /**
  * OkHttp-backed [NetworkClient].
  *
- * Transport details (timeouts, connection pooling) are centralized here.
- * Logging is limited to the request method and a redacted URL; headers and
- * bodies are never logged.
+ * Transport details are centralized here. Headers and bodies are never logged;
+ * only a scrubbed URL is included in diagnostic messages. Failure messages are
+ * fixed and data-free so raw exception text cannot leak to callers.
  */
 class OkHttpNetworkClient(
     private val client: OkHttpClient = defaultClient(),
@@ -46,12 +48,21 @@ class OkHttpNetworkClient(
                         headers = headers,
                     )
                 }
+            } catch (e: SocketTimeoutException) {
+                logger?.warn(TAG, "Request timed out: ${Scrubber.redact(request.url)}")
+                NetworkResult.Failure(FailureReason.TIMEOUT, "timed out")
+            } catch (e: InterruptedIOException) {
+                logger?.warn(TAG, "Request cancelled: ${Scrubber.redact(request.url)}")
+                NetworkResult.Failure(FailureReason.CANCELLED, "cancelled")
             } catch (e: IOException) {
-                logger?.warn(TAG, "Network request failed: ${Scrubber.redact(request.url)}", e)
-                NetworkResult.Failure(FailureReason.CONNECTIVITY, e.message)
+                logger?.warn(
+                    TAG,
+                    "Request failed (${e.javaClass.simpleName}): ${Scrubber.redact(request.url)}",
+                )
+                NetworkResult.Failure(FailureReason.CONNECTIVITY, "connection failed")
             } catch (e: Exception) {
-                logger?.error(TAG, "Unexpected network failure.", e)
-                NetworkResult.Failure(FailureReason.UNKNOWN, e.message)
+                logger?.error(TAG, "Unexpected network failure (${e.javaClass.simpleName}).")
+                NetworkResult.Failure(FailureReason.UNKNOWN, "unexpected error")
             }
         }
 
@@ -72,7 +83,6 @@ class OkHttpNetworkClient(
 
     companion object {
         private const val TAG = "OkHttpNetworkClient"
-
         private val DEFAULT_MEDIA_TYPE = "application/octet-stream".toMediaTypeOrNull()
 
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

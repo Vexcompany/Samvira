@@ -1,5 +1,7 @@
 package com.vexcompany.samvira.data.network
 
+import com.vexcompany.samvira.core.logging.AppLogger
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -37,10 +39,7 @@ class OkHttpNetworkClientTest {
         )
 
         val result = client.execute(
-            NetworkRequest(
-                method = NetworkRequest.Method.GET,
-                url = server.url("/ping").toString(),
-            ),
+            NetworkRequest(NetworkRequest.Method.GET, server.url("/ping").toString()),
         )
 
         assertTrue(result is NetworkResult.Success)
@@ -55,10 +54,7 @@ class OkHttpNetworkClientTest {
         server.enqueue(MockResponse().setResponseCode(404).setBody("missing"))
 
         val result = client.execute(
-            NetworkRequest(
-                method = NetworkRequest.Method.GET,
-                url = server.url("/nope").toString(),
-            ),
+            NetworkRequest(NetworkRequest.Method.GET, server.url("/nope").toString()),
         )
 
         assertTrue(result is NetworkResult.Failure)
@@ -72,15 +68,63 @@ class OkHttpNetworkClientTest {
         val url = server.url("/unreachable").toString()
         server.shutdown()
 
-        val result = client.execute(
+        val result = client.execute(NetworkRequest(NetworkRequest.Method.GET, url))
+
+        assertTrue(result is NetworkResult.Failure)
+        assertEquals(FailureReason.CONNECTIVITY, (result as NetworkResult.Failure).reason)
+    }
+
+    @Test
+    fun `maps read timeout to TIMEOUT`() = runTest {
+        val timeoutClient = OkHttpNetworkClient(
+            client = OkHttpClient.Builder()
+                .readTimeout(200, TimeUnit.MILLISECONDS)
+                .build(),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("slow response")
+                .setBodyDelay(2, TimeUnit.SECONDS),
+        )
+
+        val result = timeoutClient.execute(
+            NetworkRequest(NetworkRequest.Method.GET, server.url("/slow").toString()),
+        )
+
+        assertTrue(result is NetworkResult.Failure)
+        assertEquals(FailureReason.TIMEOUT, (result as NetworkResult.Failure).reason)
+    }
+
+    @Test
+    fun `does not log sensitive query material on failure`() = runTest {
+        val logs = mutableListOf<String>()
+        val recordingLogger = RecordingLogger(logs)
+        val recordingClient = OkHttpNetworkClient(
+            client = OkHttpClient(),
+            logger = recordingLogger,
+        )
+        val url = server.url("/secure").toString()
+        server.shutdown()
+
+        val result = recordingClient.execute(
             NetworkRequest(
-                method = NetworkRequest.Method.GET,
-                url = url,
+                NetworkRequest.Method.GET,
+                "$url?token=SUPERSECRETTOKEN&access_token=ALSO_SECRET",
             ),
         )
 
         assertTrue(result is NetworkResult.Failure)
-        val failure = result as NetworkResult.Failure
-        assertEquals(FailureReason.CONNECTIVITY, failure.reason)
+        assertTrue(logs.isNotEmpty())
+        assertTrue(logs.none { it.contains("SUPERSECRETTOKEN") })
+        assertTrue(logs.none { it.contains("ALSO_SECRET") })
+        assertTrue(logs.any { it.contains("<redacted>") })
+    }
+
+    private class RecordingLogger(private val sink: MutableList<String>) : AppLogger {
+        override fun debug(tag: String, message: String, throwable: Throwable?) { sink += message }
+        override fun info(tag: String, message: String, throwable: Throwable?) { sink += message }
+        override fun warn(tag: String, message: String, throwable: Throwable?) { sink += message }
+        override fun error(tag: String, message: String, throwable: Throwable?) { sink += message }
     }
 }

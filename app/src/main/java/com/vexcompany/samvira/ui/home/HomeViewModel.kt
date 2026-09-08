@@ -4,17 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vexcompany.samvira.domain.identity.InstallationIdentityRepository
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * UI state for the foundation home screen.
- *
- * The public key fingerprint is a non-secret hash of the public key, used only
- * to give the user a compact, stable reference for their installation.
- */
+/** UI state for the foundation home screen. */
 data class HomeUiState(
     val isLoading: Boolean = true,
     val identityProvisioned: Boolean = false,
@@ -40,10 +36,15 @@ class HomeViewModel(
                     installationId = identity.installationId,
                     publicKeyFingerprint = fingerprint(identity.publicKeyPem),
                 )
-            } catch (t: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Do not surface raw Keystore, filesystem, or platform
+                // exception text. It may contain implementation details or
+                // sensitive request/path material.
                 _uiState.value = HomeUiState(
                     isLoading = false,
-                    error = t.message ?: "Unknown error",
+                    error = "Identity unavailable. Please restart SAMVIRA.",
                 )
             }
         }
