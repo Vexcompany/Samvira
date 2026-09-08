@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { get, post, registerAndVerify, startServer, generateKeyPair } from './helpers.js';
+import { hashToken } from '../src/security.js';
 
 function mediaProvider() {
   const source = 'https://drive.internal/media/photo-1';
@@ -15,12 +16,12 @@ function mediaProvider() {
   };
 }
 
-async function authenticatedMediaServer() {
-  const ctx = await startServer({ provider: mediaProvider() });
+async function authenticatedMediaServer({ config = {}, now } = {}) {
+  const ctx = await startServer({ provider: mediaProvider(), config, now });
   const keyPair = generateKeyPair();
   const auth = await registerAndVerify(ctx.base, { installationId: 'media-inst', keyPair });
-  ctx.storage.createOrganization('org-1', 'Test Org', Date.now());
-  ctx.storage.addMembership('media-inst', 'org-1', 'ACTIVE', Date.now());
+  ctx.storage.createOrganization('org-1', 'Test Org', now ? now() : Date.now());
+  ctx.storage.addMembership('media-inst', 'org-1', 'ACTIVE', now ? now() : Date.now());
   return { ctx, token: auth.verify.body.session_token };
 }
 
@@ -44,6 +45,19 @@ test('media view creates a short-lived installation-bound gateway grant', async 
     assert.equal(typeof res.body.access_token, 'string');
     assert.equal(res.body.expires_at_epoch_ms > Date.now(), true);
     assert.equal(res.body.content_url.includes('drive.internal'), false);
+  } finally { await ctx.close(); }
+});
+
+test('media view expiry never outlives the authenticated session', async () => {
+  const currentTime = 1_700_000_000_000;
+  const now = () => currentTime;
+  const { ctx, token } = await authenticatedMediaServer({ config: { sessionTtlMs: 1_000, mediaViewTtlMs: 5_000 }, now });
+  try {
+    const res = await post(ctx.base, '/api/v1/media/photo-1/view', {}, { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.expires_at_epoch_ms, currentTime + 1_000);
+    const persisted = ctx.storage.getMediaView(hashToken(res.body.access_token), currentTime);
+    assert.equal(persisted.expires_at, currentTime + 1_000);
   } finally { await ctx.close(); }
 });
 
