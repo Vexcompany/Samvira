@@ -5,11 +5,13 @@ import { hashToken } from '../src/security.js';
 
 function mediaProvider() {
   const source = 'https://drive.internal/media/photo-1';
+  const thumbnail = 'https://drive.internal/thumb/photo-1';
   return {
     async listMedia() {
-      return [{ media_id: 'photo-1', type: 'PHOTO', mime_type: 'image/jpeg', width: 1200, height: 800, duration_ms: null, created_at_epoch_ms: 1700000000000, thumbnail_url: 'https://drive.internal/thumb/photo-1', source_url: source }];
+      return [{ media_id: 'photo-1', type: 'PHOTO', mime_type: 'image/jpeg', width: 1200, height: 800, duration_ms: null, created_at_epoch_ms: 1700000000000, thumbnail_url: thumbnail, source_url: source }];
     },
     async openMedia(url) {
+      if (url === thumbnail) return new Response('thumbnail-bytes', { status: 200, headers: { 'content-type': 'image/webp' } });
       assert.equal(url, source);
       return new Response('image-bytes', { status: 200, headers: { 'content-type': 'image/jpeg' } });
     },
@@ -31,8 +33,20 @@ test('media listing is organization-scoped and never exposes provider URLs', asy
     const res = await get(ctx.base, '/api/v1/media?organization_id=org-1', { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
     assert.equal(res.status, 200);
     assert.equal(res.body.media[0].media_id, 'photo-1');
-    assert.equal(res.body.media[0].thumbnail_url, null);
+    assert.equal(res.body.media[0].thumbnail_url, '/api/v1/media/photo-1/thumbnail');
     assert.equal(JSON.stringify(res.body).includes('drive.internal'), false);
+  } finally { await ctx.close(); }
+});
+
+test('authorized thumbnail gateway never exposes the provider URL', async () => {
+  const { ctx, token } = await authenticatedMediaServer();
+  try {
+    const denied = await get(ctx.base, '/api/v1/media/photo-1/thumbnail');
+    assert.equal(denied.status, 401);
+    const allowed = await get(ctx.base, '/api/v1/media/photo-1/thumbnail', { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.headers.get('content-type'), 'image/webp');
+    assert.equal(await allowed.text(), 'thumbnail-bytes');
   } finally { await ctx.close(); }
 });
 
