@@ -1,0 +1,2816 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..c95d3e5
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,46 @@
++name: CI
++
++on:
++  push:
++    branches: ["main", "arena/**"]
++  pull_request:
++
++permissions:
++  contents: read
++
++jobs:
++  build-and-test:
++    name: Build & test
++    runs-on: ubuntu-latest
++    timeout-minutes: 30
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Set up JDK 17
++        uses: actions/setup-java@v4
++        with:
++          distribution: temurin
++          java-version: 17
++
++      - name: Set up Gradle
++        uses: gradle/actions/setup-gradle@v3
++
++      - name: Build (debug) and lint
++        run: ./gradlew --no-daemon assembleDebug lintDebug
++
++      - name: Run unit tests
++        run: ./gradlew --no-daemon testDebugUnitTest
++
++      - name: Compile instrumented test sources
++        run: ./gradlew --no-daemon assembleDebugAndroidTest
++
++      - name: Upload test reports
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: test-reports
++          path: |
++            app/build/reports/tests/
++            app/build/reports/lint-results-debug.html
++          if-no-files-found: ignore
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..b82dc28
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,25 @@
++# Gradle
++.gradle/
++build/
++!gradle/wrapper/gradle-wrapper.jar
++
++# Local configuration (contains machine-specific paths)
++local.properties
++
++# IDE
++.idea/
++*.iml
++.DS_Store
++
++# Android build output
++/app/build/
++captures/
++.externalNativeBuild/
++.cxx/
++
++# Keystore / signing (never commit)
++*.jks
++*.keystore
++
++# Logs
++*.log
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..f260ccf
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,153 @@
++# SAMVIRA
++
++SAMVIRA is a privacy-first Android photo & memory viewer for organization-based
++communities. It is a **viewer and memory experience**, not the original-file
++management system: media is displayed while access and media policies are
++enforced server-side.
++
++> **Privacy by default, sharing by permission.** Seeing a photo does not
++> automatically mean the viewer may download, share, or retain the original.
++
++This repository currently contains **Milestone 0.2 — Identity & Application
++Shell Hardening** (on top of the Milestone 0.1 foundation). It establishes the
++project structure, application identity, toolchain, and the abstractions that
++later milestones (organization membership, albums, download approval, …) will
++build on. It does **not** yet implement any product feature.
++
++## Project status
++
++| Area | Status (0.2) |
++| --- | --- |
++| Compose application shell | ✅ |
++| Navigation architecture | ✅ |
++| Local persistence abstraction (DataStore) | ✅ |
++| Networking abstraction (OkHttp) | ✅ |
++| Installation identity foundation (Android Keystore) | ✅ |
++| Identity provisioning (concurrency-safe, fail-closed) | ✅ |
++| Logging/redaction boundary (messages + throwables) | ✅ |
++| Unit tests (happy paths + failure paths) | ✅ |
++| CI (GitHub Actions) | ⚠️ workflow pending (see CI section) |
++| Backend / sync / gallery / accounts | 🚫 out of scope |
++
++## Architecture
++
++The code is organized by layer, keeping boundaries clean so implementations can
++evolve (e.g. replacing OkHttp or DataStore, or introducing a backend) without
++rewriting callers.
++
++```
++com.vexcompany.samvira
++├── core/        # DI container + logging/redaction boundary
++├── domain/      # Business logic and models (installation identity)
++├── data/        # Persistence + networking, behind interfaces
++│   ├── identity/    # DataStore-backed installation metadata
++│   └── network/     # OkHttp-backed NetworkClient
++├── security/    # Android Keystore signing key + FLAG_SECURE helper
++└── ui/          # Compose theme, navigation, home screen
++```
++
++Dependency injection is **manual** (constructor injection via `AppContainer`).
++No compile-time DI framework is used yet; one can be introduced later if it
++materially improves maintainability.
++
++### Installation identity
++
++SAMVIRA uses an installation-based identity rather than a username/password
++account system:
++
++1. On first use, an EC P-256 key pair is generated inside **Android Keystore**.
++2. The private key is **non-exportable** and never leaves the device.
++3. A random installation identifier is generated and persisted via DataStore.
++4. The public key is exposed (PEM) for future server registration and
++   proof-of-possession/signature authentication.
++
++Important properties and limitations:
++
++- The installation identifier is random (a UUID, ~122 bits of entropy); it is
++  **not** derived from IMEI, serial number, MAC address, advertising ID, or any
++  hardware fingerprint.
++- Uninstall / clear-data / factory-reset can create a **new** installation
++  identity. Cryptographic installation identity is not a claim of permanent
++  physical-device uniqueness.
++- Backups are disabled (`android:allowBackup="false"`) so identity/session
++  material is not extracted via backup or device transfer.
++- The fixed key alias makes key creation deterministic **per installation**
++  (the same installation always resolves to the same key). Key generation and
++  identity provisioning are serialized, so concurrent first-use access cannot
++  mint duplicate installation identifiers or attempt double key generation.
++- Provisioning fails closed: if the Keystore or persistence layer throws, the
++  error propagates and no partial identity is returned or persisted.
++
++### Privacy boundaries (foundation)
++
++- View access is modeled as separate from download permission (no download code
++  exists yet, but the architecture preserves the distinction).
++- `ScreenGuard` wraps `FLAG_SECURE` for future sensitive surfaces. Screenshot
++  protection cannot stop external cameras, rooted/modified devices, or other
++  out-of-band capture — it is a deterrent, not a security mechanism. It is
++  applied only where a surface opts in; nothing enables it by default today.
++- Logging funnels through `AppLogger`. `Scrubber` redacts common secret shapes
++  (authorization headers — including the scheme and credential, bearer tokens,
++  key/value credentials, URL userinfo and query secrets, private keys), and
++  `PlatformAppLogger` sanitizes throwable messages before they reach logcat, so
++  sensitive material cannot leak through exception text. Callers must still
++  avoid logging sensitive values in the first place.
++- The network client logs only a redacted URL and an exception class name, and
++  returns fixed, data-free failure messages; raw exception text is never
++  surfaced. Timeouts and cancellations are distinguished from generic
++  connectivity failures.
++
++## Toolchain
++
++- **Kotlin** 2.0.21
++- **Gradle** 8.7 (wrapper committed; distribution checksum pinned)
++- **Android Gradle Plugin** 8.5.2
++- **Jetpack Compose** (BOM 2024.06.00) + Material 3
++- **minSdk** 26 · **targetSdk / compileSdk** 34
++- **JDK** 17
++
++The Gradle wrapper is committed with `distributionSha256Sum` for
++supply-chain safety. To verify it: `sha256sum gradle/wrapper/gradle-wrapper.jar`
++should equal `cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8`
++(the official Gradle 8.7 wrapper JAR checksum).
++
++## Building
++
++```bash
++# Build the debug APK
++./gradlew assembleDebug
++
++# Run JVM unit tests
++./gradlew testDebugUnitTest
++
++# Lint
++./gradlew lintDebug
++
++# Run instrumented tests (requires a connected device/emulator)
++./gradlew connectedDebugAndroidTest
++```
++
++## CI
++
++A minimal GitHub Actions workflow is defined at `.github/workflows/ci.yml`
++(build debug APK, run lint, run JVM unit tests, compile instrumented test
++sources). At the time of writing it is **not yet active on the remote branch**:
++the automation token used to author this repository lacks the `workflows`
++permission, so the workflow file could not be pushed. Until a maintainer with
++the `workflows` permission adds it, CI will not run. Build/test status for this
++milestone therefore remains unverified on CI.
++
++## Contributing / decisions log
++
++- Package/application id is `com.vexcompany.samvira` (reverse-DNS of the owning
++  GitHub organization). It can be changed before first public release without
++  affecting the code structure.
++- The brand palette is a placeholder and can be replaced without touching
++  screen code (screens reference semantic theme colors only).
++- Manual DI was chosen over Hilt/Koin to keep the foundation small and
++  auditable; revisit when the object graph grows.
++- Out of scope for 0.1 (intentionally not implemented): Google Drive
++  integration, backend server, organization membership UI, login/account
++  system, album/media sync, download approval, comments/reactions backend,
++  admin dashboard, WhatsApp integration, complex offline sync, analytics, and
++  advertising.
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+new file mode 100644
+index 0000000..0eb1d9b
+--- /dev/null
++++ b/app/build.gradle.kts
+@@ -0,0 +1,84 @@
++plugins {
++    alias(libs.plugins.android.application)
++    alias(libs.plugins.kotlin.android)
++    alias(libs.plugins.kotlin.compose)
++}
++
++android {
++    namespace = "com.vexcompany.samvira"
++    compileSdk = 34
++
++    defaultConfig {
++        applicationId = "com.vexcompany.samvira"
++        minSdk = 26
++        targetSdk = 34
++        versionCode = 1
++        versionName = "0.1.0"
++
++        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
++        vectorDrawables {
++            useSupportLibrary = true
++        }
++    }
++
++    buildTypes {
++        release {
++            isMinifyEnabled = false
++            proguardFiles(
++                getDefaultProguardFile("proguard-android-optimize.txt"),
++                "proguard-rules.pro",
++            )
++        }
++    }
++
++    compileOptions {
++        sourceCompatibility = JavaVersion.VERSION_17
++        targetCompatibility = JavaVersion.VERSION_17
++    }
++
++    kotlinOptions {
++        jvmTarget = "17"
++    }
++
++    buildFeatures {
++        compose = true
++    }
++
++    packaging {
++        resources {
++            excludes += "/META-INF/{AL2.0,LGPL2.1}"
++        }
++    }
++}
++
++dependencies {
++    implementation(libs.androidx.core.ktx)
++    implementation(libs.androidx.activity.compose)
++    implementation(libs.androidx.lifecycle.runtime.ktx)
++    implementation(libs.androidx.lifecycle.runtime.compose)
++    implementation(libs.androidx.lifecycle.viewmodel.ktx)
++    implementation(libs.androidx.lifecycle.viewmodel.compose)
++    implementation(libs.androidx.navigation.compose)
++    implementation(libs.androidx.datastore.preferences)
++    implementation(libs.kotlinx.coroutines.core)
++    implementation(libs.kotlinx.coroutines.android)
++    implementation(libs.okhttp)
++
++    implementation(platform(libs.androidx.compose.bom))
++    implementation(libs.androidx.compose.ui)
++    implementation(libs.androidx.compose.ui.graphics)
++    implementation(libs.androidx.compose.ui.tooling.preview)
++    implementation(libs.androidx.compose.material3)
++    debugImplementation(libs.androidx.compose.ui.tooling)
++    debugImplementation(libs.androidx.compose.ui.test.manifest)
++
++    testImplementation(libs.junit)
++    testImplementation(libs.kotlinx.coroutines.test)
++    testImplementation(libs.okhttp.mockwebserver)
++
++    androidTestImplementation(libs.androidx.junit)
++    androidTestImplementation(libs.androidx.espresso.core)
++    androidTestImplementation(libs.androidx.test.runner)
++    androidTestImplementation(platform(libs.androidx.compose.bom))
++    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
++}
+diff --git a/app/proguard-rules.pro b/app/proguard-rules.pro
+new file mode 100644
+index 0000000..d48b705
+--- /dev/null
++++ b/app/proguard-rules.pro
+@@ -0,0 +1,8 @@
++# SAMVIRA ProGuard/R8 rules.
++#
++# Minification is disabled for Milestone 0.1. These rules are kept as a
++# foundation for the release configuration. When minification is enabled,
++# add keep rules for reflection-based frameworks (if any are introduced) here.
++
++# Keep line numbers for readable stack traces in crash reporting.
++-keepattributes SourceFile,LineNumberTable
+diff --git a/app/src/androidTest/java/com/vexcompany/samvira/MainActivityTest.kt b/app/src/androidTest/java/com/vexcompany/samvira/MainActivityTest.kt
+new file mode 100644
+index 0000000..27e2884
+--- /dev/null
++++ b/app/src/androidTest/java/com/vexcompany/samvira/MainActivityTest.kt
+@@ -0,0 +1,28 @@
++package com.vexcompany.samvira
++
++import androidx.compose.ui.test.assertIsDisplayed
++import androidx.compose.ui.test.junit4.createAndroidComposeRule
++import androidx.compose.ui.test.onNodeWithText
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import org.junit.Rule
++import org.junit.Test
++import org.junit.runner.RunWith
++
++/**
++ * Instrumented smoke test for the Compose shell.
++ *
++ * Requires a device/emulator. CI compiles this source set (see workflow) but
++ * does not run it, since the hosted runner has no emulator; connected tests can
++ * be enabled later with a device farm or emulator-based runner.
++ */
++@RunWith(AndroidJUnit4::class)
++class MainActivityTest {
++
++    @get:Rule
++    val composeRule = createAndroidComposeRule<MainActivity>()
++
++    @Test
++    fun homeScreen_displaysBrand() {
++        composeRule.onNodeWithText("SAMVIRA").assertIsDisplayed()
++    }
++}
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+new file mode 100644
+index 0000000..40c00fa
+--- /dev/null
++++ b/app/src/main/AndroidManifest.xml
+@@ -0,0 +1,29 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++
++    <!--
++      Privacy by default: backups are disabled so installation identity and
++      any future session material are never extracted via adb backup or cloud
++      backup/device transfer.
++    -->
++    <application
++        android:name=".SamviraApplication"
++        android:allowBackup="false"
++        android:icon="@mipmap/ic_launcher"
++        android:roundIcon="@mipmap/ic_launcher_round"
++        android:label="@string/app_name"
++        android:supportsRtl="true"
++        android:theme="@style/Theme.Samvira">
++
++        <activity
++            android:name=".MainActivity"
++            android:exported="true"
++            android:theme="@style/Theme.Samvira">
++            <intent-filter>
++                <action android:name="android.intent.action.MAIN" />
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
++    </application>
++
++</manifest>
+diff --git a/app/src/main/java/com/vexcompany/samvira/MainActivity.kt b/app/src/main/java/com/vexcompany/samvira/MainActivity.kt
+new file mode 100644
+index 0000000..66792df
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/MainActivity.kt
+@@ -0,0 +1,26 @@
++package com.vexcompany.samvira
++
++import android.os.Bundle
++import androidx.activity.ComponentActivity
++import androidx.activity.compose.setContent
++import androidx.activity.enableEdgeToEdge
++import com.vexcompany.samvira.ui.navigation.SamviraNavHost
++import com.vexcompany.samvira.ui.theme.SamviraTheme
++
++/**
++ * Single-activity host for the Compose UI. All screens live inside
++ * [SamviraNavHost]; navigation state is owned by the NavHost's controller.
++ */
++class MainActivity : ComponentActivity() {
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        enableEdgeToEdge()
++        setContent {
++            SamviraTheme {
++                val container = (application as SamviraApplication).container
++                SamviraNavHost(container = container)
++            }
++        }
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/SamviraApplication.kt b/app/src/main/java/com/vexcompany/samvira/SamviraApplication.kt
+new file mode 100644
+index 0000000..274a408
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/SamviraApplication.kt
+@@ -0,0 +1,23 @@
++package com.vexcompany.samvira
++
++import android.app.Application
++import com.vexcompany.samvira.core.di.AppContainer
++
++/**
++ * Application entry point. Owns the manual dependency container for the app.
++ *
++ * Manual constructor injection (via [AppContainer]) is used instead of a
++ * compile-time DI framework: the foundation is small and the wiring stays
++ * explicit and auditable. A DI framework can be introduced later if it
++ * materially improves maintainability.
++ */
++class SamviraApplication : Application() {
++
++    lateinit var container: AppContainer
++        private set
++
++    override fun onCreate() {
++        super.onCreate()
++        container = AppContainer(this)
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/core/di/AppContainer.kt b/app/src/main/java/com/vexcompany/samvira/core/di/AppContainer.kt
+new file mode 100644
+index 0000000..a22073e
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/core/di/AppContainer.kt
+@@ -0,0 +1,53 @@
++package com.vexcompany.samvira.core.di
++
++import android.content.Context
++import com.vexcompany.samvira.core.logging.AppLogger
++import com.vexcompany.samvira.core.logging.PlatformAppLogger
++import com.vexcompany.samvira.data.identity.DataStoreInstallationIdentityStore
++import com.vexcompany.samvira.data.identity.InstallationIdentityStore
++import com.vexcompany.samvira.data.network.NetworkClient
++import com.vexcompany.samvira.data.network.OkHttpNetworkClient
++import com.vexcompany.samvira.domain.identity.DefaultInstallationIdentityRepository
++import com.vexcompany.samvira.domain.identity.InstallationIdentityRepository
++import com.vexcompany.samvira.security.keystore.AndroidKeystoreInstallKeyStore
++import com.vexcompany.samvira.security.keystore.InstallKeyStore
++
++/**
++ * Manual dependency container.
++ *
++ * Every concrete dependency is declared here as a lazily-constructed property.
++ * Boundaries between UI / domain / data / security layers are preserved by
++ * exposing interfaces ([InstallationIdentityRepository], [NetworkClient],
++ * [InstallKeyStore], [InstallationIdentityStore]) rather than their
++ * platform-specific implementations.
++ */
++class AppContainer(context: Context) {
++
++    private val appContext = context.applicationContext
++
++    /** Redaction-aware logging boundary. */
++    val logger: AppLogger = PlatformAppLogger()
++
++    /** Security: non-exportable installation key, backed by Android Keystore. */
++    val installKeyStore: InstallKeyStore by lazy {
++        AndroidKeystoreInstallKeyStore()
++    }
++
++    /** Data: local persistence for installation identity metadata. */
++    val identityStore: InstallationIdentityStore by lazy {
++        DataStoreInstallationIdentityStore(appContext)
++    }
++
++    /** Data: networking abstraction. */
++    val networkClient: NetworkClient by lazy {
++        OkHttpNetworkClient(logger = logger)
++    }
++
++    /** Domain: installation identity orchestration. */
++    val identityRepository: InstallationIdentityRepository by lazy {
++        DefaultInstallationIdentityRepository(
++            keyStore = installKeyStore,
++            identityStore = identityStore,
++        )
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/core/logging/AppLogger.kt b/app/src/main/java/com/vexcompany/samvira/core/logging/AppLogger.kt
+new file mode 100644
+index 0000000..636c25e
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/core/logging/AppLogger.kt
+@@ -0,0 +1,13 @@
++package com.vexcompany.samvira.core.logging
++
++/**
++ * Logging boundary. All logging in the app funnels through this interface so
++ * that sensitive values can be scrubbed in one place and the platform logger
++ * can be replaced (or disabled) without touching call sites.
++ */
++interface AppLogger {
++    fun debug(tag: String, message: String, throwable: Throwable? = null)
++    fun info(tag: String, message: String, throwable: Throwable? = null)
++    fun warn(tag: String, message: String, throwable: Throwable? = null)
++    fun error(tag: String, message: String, throwable: Throwable? = null)
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/core/logging/PlatformAppLogger.kt b/app/src/main/java/com/vexcompany/samvira/core/logging/PlatformAppLogger.kt
+new file mode 100644
+index 0000000..29156ab
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/core/logging/PlatformAppLogger.kt
+@@ -0,0 +1,30 @@
++package com.vexcompany.samvira.core.logging
++
++import android.util.Log
++
++/**
++ * Default [AppLogger] backed by [android.util.Log].
++ *
++ * Every message passes through [Scrubber.redact] and every throwable through
++ * [Scrubber.sanitizeThrowable] before reaching the platform logger, so
++ * accidental log statements containing tokens, API keys, passwords, private
++ * keys, or sensitive throwable messages are neutralized at the boundary.
++ */
++class PlatformAppLogger : AppLogger {
++
++    override fun debug(tag: String, message: String, throwable: Throwable?) {
++        Log.d(tag, Scrubber.redact(message), Scrubber.sanitizeThrowable(throwable))
++    }
++
++    override fun info(tag: String, message: String, throwable: Throwable?) {
++        Log.i(tag, Scrubber.redact(message), Scrubber.sanitizeThrowable(throwable))
++    }
++
++    override fun warn(tag: String, message: String, throwable: Throwable?) {
++        Log.w(tag, Scrubber.redact(message), Scrubber.sanitizeThrowable(throwable))
++    }
++
++    override fun error(tag: String, message: String, throwable: Throwable?) {
++        Log.e(tag, Scrubber.redact(message), Scrubber.sanitizeThrowable(throwable))
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/core/logging/Scrubber.kt b/app/src/main/java/com/vexcompany/samvira/core/logging/Scrubber.kt
+new file mode 100644
+index 0000000..16c2070
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/core/logging/Scrubber.kt
+@@ -0,0 +1,60 @@
++package com.vexcompany.samvira.core.logging
++
++/**
++ * Pure, testable redaction for log output.
++ *
++ * This is intentionally conservative: it masks common secret shapes
++ * (authorization headers, bearer tokens, key/value credentials, URL userinfo,
++ * PEM private key blocks) with a placeholder. It is a safety net, not a
++ * guarantee — callers must still avoid logging sensitive values in the first
++ * place.
++ */
++object Scrubber {
++
++    private data class Rule(val pattern: Regex, val replacement: String)
++
++    private val rules = listOf(
++        // "Authorization: <type> <value>" style headers — consumes the whole
++        // remainder of the line so the scheme AND the credential are redacted.
++        Rule(Regex("""(?i)authorization\s*[:=]\s*[^\r\n]*"""), "<redacted>"),
++        // Bare "Bearer <token>" occurrences.
++        Rule(Regex("""(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]+"""), "<redacted>"),
++        // key=value / key: value credentials. The value charset stops at
++        // whitespace and common URL delimiters so query strings are redacted
++        // without swallowing the rest of the URL.
++        Rule(
++            Regex(
++                """(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|""" +
++                    """session[_-]?(id|token)?|credential(s)?|secret|password|token)\b\s*[:=]\s*[^\s,;&?#]+""",
++            ),
++            "<redacted>",
++        ),
++        // URL userinfo: scheme://user:password@host. Preserves scheme and host.
++        Rule(Regex("""(?i)(://)[^/\s@:]+:[^/\s@]*@"""), "$1<redacted>@"),
++        // PEM-encoded private keys.
++        Rule(
++            Regex("""-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"""),
++            "<redacted>",
++        ),
++    )
++
++    fun redact(input: String): String =
++        rules.fold(input) { acc, rule -> rule.pattern.replace(acc, rule.replacement) }
++
++    /**
++     * Returns a copy of [throwable] whose message is redacted and whose stack
++     * trace is preserved, or `null` when [throwable] is `null`.
++     *
++     * Throwable messages can carry request data (e.g. OkHttp echoing a URL on a
++     * malformed request), so throwables must be scrubbed before they reach the
++     * platform logger, just like ordinary messages. The exception's cause chain
++     * is deliberately dropped: it is rarely useful in logs and can itself carry
++     * sensitive text.
++     */
++    fun sanitizeThrowable(throwable: Throwable?): Throwable? {
++        if (throwable == null) return null
++        val sanitized = Throwable(redact(throwable.message ?: throwable.javaClass.simpleName))
++        sanitized.stackTrace = throwable.stackTrace
++        return sanitized
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/data/identity/DataStoreInstallationIdentityStore.kt b/app/src/main/java/com/vexcompany/samvira/data/identity/DataStoreInstallationIdentityStore.kt
+new file mode 100644
+index 0000000..49da828
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/data/identity/DataStoreInstallationIdentityStore.kt
+@@ -0,0 +1,48 @@
++package com.vexcompany.samvira.data.identity
++
++import android.content.Context
++import androidx.datastore.core.DataStore
++import androidx.datastore.preferences.core.Preferences
++import androidx.datastore.preferences.core.edit
++import androidx.datastore.preferences.core.longPreferencesKey
++import androidx.datastore.preferences.core.stringPreferencesKey
++import androidx.datastore.preferences.preferencesDataStore
++import kotlinx.coroutines.flow.first
++
++private val Context.identityDataStore: DataStore<Preferences> by preferencesDataStore(
++    name = "installation_identity",
++)
++
++/**
++ * DataStore-backed [InstallationIdentityStore].
++ *
++ * DataStore is preferred over raw SharedPreferences here because it exposes a
++ * Flow, is transaction-safe, and is the modern Android persistence primitive
++ * for small key/value state.
++ */
++class DataStoreInstallationIdentityStore(context: Context) : InstallationIdentityStore {
++
++    private val dataStore = context.applicationContext.identityDataStore
++
++    override suspend fun load(): InstallationIdentityRecord? {
++        val prefs = dataStore.data.first()
++        val installationId = prefs[KEY_INSTALLATION_ID] ?: return null
++        val createdAt = prefs[KEY_CREATED_AT] ?: return null
++        return InstallationIdentityRecord(
++            installationId = installationId,
++            createdAtEpochMs = createdAt,
++        )
++    }
++
++    override suspend fun save(record: InstallationIdentityRecord) {
++        dataStore.edit { prefs ->
++            prefs[KEY_INSTALLATION_ID] = record.installationId
++            prefs[KEY_CREATED_AT] = record.createdAtEpochMs
++        }
++    }
++
++    private companion object {
++        val KEY_INSTALLATION_ID = stringPreferencesKey("installation_id")
++        val KEY_CREATED_AT = longPreferencesKey("created_at_epoch_ms")
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/data/identity/InstallationIdentityStore.kt b/app/src/main/java/com/vexcompany/samvira/data/identity/InstallationIdentityStore.kt
+new file mode 100644
+index 0000000..c3d0b74
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/data/identity/InstallationIdentityStore.kt
+@@ -0,0 +1,22 @@
++package com.vexcompany.samvira.data.identity
++
++/**
++ * Persisted, non-secret portion of the installation identity.
++ *
++ * Key material is deliberately absent from this record; it stays in the
++ * Android Keystore and is accessed through the security layer.
++ */
++data class InstallationIdentityRecord(
++    val installationId: String,
++    val createdAtEpochMs: Long,
++)
++
++/**
++ * Abstraction over local persistence of installation identity metadata.
++ * The concrete implementation is DataStore-backed today and can evolve
++ * without affecting the domain layer.
++ */
++interface InstallationIdentityStore {
++    suspend fun load(): InstallationIdentityRecord?
++    suspend fun save(record: InstallationIdentityRecord)
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/data/network/NetworkClient.kt b/app/src/main/java/com/vexcompany/samvira/data/network/NetworkClient.kt
+new file mode 100644
+index 0000000..42b8569
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/data/network/NetworkClient.kt
+@@ -0,0 +1,16 @@
++package com.vexcompany.samvira.data.network
++
++/**
++ * Networking abstraction.
++ *
++ * The foundation does not yet talk to a backend; this interface exists so that
++ * the transport (OkHttp today, potentially a protocol client later) can evolve
++ * without coupling the rest of the app to a specific backend implementation.
++ *
++ * Implementations must:
++ *  - never log raw authorization headers or request bodies, and
++ *  - fail closed (return [NetworkResult.Failure]) on unexpected input.
++ */
++interface NetworkClient {
++    suspend fun execute(request: NetworkRequest): NetworkResult
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/data/network/NetworkModels.kt b/app/src/main/java/com/vexcompany/samvira/data/network/NetworkModels.kt
+new file mode 100644
+index 0000000..c49037f
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/data/network/NetworkModels.kt
+@@ -0,0 +1,39 @@
++package com.vexcompany.samvira.data.network
++
++/**
++ * HTTP request model for [NetworkClient]. Headers/body are explicit so that
++ * callers never need to smuggle credentials through URLs.
++ */
++data class NetworkRequest(
++    val method: Method,
++    val url: String,
++    val headers: Map<String, String> = emptyMap(),
++    val body: ByteArray? = null,
++) {
++    enum class Method { GET, POST }
++}
++
++/** Result of a [NetworkClient] call. */
++sealed interface NetworkResult {
++
++    data class Success(
++        val statusCode: Int,
++        val body: ByteArray,
++        val headers: Map<String, String>,
++    ) : NetworkResult
++
++    data class Failure(
++        val reason: FailureReason,
++        val message: String? = null,
++    ) : NetworkResult
++}
++
++/** Coarse-grained failure taxonomy; callers must fail closed on any of these. */
++enum class FailureReason {
++    CONNECTIVITY,
++    TIMEOUT,
++    HTTP_ERROR,
++    INVALID_RESPONSE,
++    CANCELLED,
++    UNKNOWN,
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/data/network/OkHttpNetworkClient.kt b/app/src/main/java/com/vexcompany/samvira/data/network/OkHttpNetworkClient.kt
+new file mode 100644
+index 0000000..60d5f69
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/data/network/OkHttpNetworkClient.kt
+@@ -0,0 +1,104 @@
++package com.vexcompany.samvira.data.network
++
++import com.vexcompany.samvira.core.logging.AppLogger
++import com.vexcompany.samvira.core.logging.Scrubber
++import java.io.InterruptedIOException
++import java.io.IOException
++import java.net.SocketTimeoutException
++import java.util.concurrent.TimeUnit
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import okhttp3.MediaType.Companion.toMediaTypeOrNull
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++
++/**
++ * OkHttp-backed [NetworkClient].
++ *
++ * Transport details (timeouts, connection pooling) are centralized here.
++ * Logging is limited to the request method and a redacted URL; headers and
++ * bodies are never logged, and exception objects are never forwarded to the
++ * logger (only their class name), so no credentials or sensitive URLs can
++ * appear in logs via this class.
++ *
++ * Failures are represented by [FailureReason] with fixed, data-free messages;
++ * raw exception text is never surfaced.
++ */
++class OkHttpNetworkClient(
++    private val client: OkHttpClient = defaultClient(),
++    private val logger: AppLogger? = null,
++) : NetworkClient {
++
++    override suspend fun execute(request: NetworkRequest): NetworkResult =
++        withContext(Dispatchers.IO) {
++            try {
++                client.newCall(request.toOkHttp()).execute().use { response ->
++                    val statusCode = response.code
++                    val body = response.body?.bytes() ?: ByteArray(0)
++                    val headers = response.headers
++                        .toMultimap()
++                        .mapValues { (_, values) -> values.joinToString(", ") }
++
++                    if (!response.isSuccessful) {
++                        return@withContext NetworkResult.Failure(
++                            reason = FailureReason.HTTP_ERROR,
++                            message = "HTTP $statusCode",
++                        )
++                    }
++
++                    NetworkResult.Success(
++                        statusCode = statusCode,
++                        body = body,
++                        headers = headers,
++                    )
++                }
++            } catch (e: SocketTimeoutException) {
++                logger?.warn(TAG, "Request timed out: ${Scrubber.redact(request.url)}")
++                NetworkResult.Failure(FailureReason.TIMEOUT, "timed out")
++            } catch (e: InterruptedIOException) {
++                logger?.warn(TAG, "Request cancelled: ${Scrubber.redact(request.url)}")
++                NetworkResult.Failure(FailureReason.CANCELLED, "cancelled")
++            } catch (e: IOException) {
++                logger?.warn(
++                    TAG,
++                    "Request failed (${e.javaClass.simpleName}): ${Scrubber.redact(request.url)}",
++                )
++                NetworkResult.Failure(FailureReason.CONNECTIVITY, "connection failed")
++            } catch (e: Exception) {
++                logger?.error(TAG, "Unexpected network failure (${e.javaClass.simpleName}).")
++                NetworkResult.Failure(FailureReason.UNKNOWN, "unexpected error")
++            }
++        }
++
++    private fun NetworkRequest.toOkHttp(): Request {
++        val builder = Request.Builder().url(url)
++        headers.forEach { (name, value) -> builder.header(name, value) }
++        when (method) {
++            NetworkRequest.Method.GET -> builder.get()
++            NetworkRequest.Method.POST -> {
++                val contentType = headers["Content-Type"]
++                    ?.toMediaTypeOrNull()
++                    ?: DEFAULT_MEDIA_TYPE
++                builder.post((body ?: ByteArray(0)).toRequestBody(contentType))
++            }
++        }
++        return builder.build()
++    }
++
++    companion object {
++        private const val TAG = "OkHttpNetworkClient"
++
++        private val DEFAULT_MEDIA_TYPE = "application/octet-stream".toMediaTypeOrNull()
++
++        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
++            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
++            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
++            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
++            .build()
++
++        private const val CONNECT_TIMEOUT_SECONDS = 10L
++        private const val READ_TIMEOUT_SECONDS = 30L
++        private const val WRITE_TIMEOUT_SECONDS = 30L
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepository.kt b/app/src/main/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepository.kt
+new file mode 100644
+index 0000000..31a651f
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepository.kt
+@@ -0,0 +1,65 @@
++package com.vexcompany.samvira.domain.identity
++
++import com.vexcompany.samvira.data.identity.InstallationIdentityRecord
++import com.vexcompany.samvira.data.identity.InstallationIdentityStore
++import com.vexcompany.samvira.security.keystore.InstallKeyStore
++import java.util.UUID
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
++
++/**
++ * Orchestrates installation identity between the Android Keystore (key
++ * material) and local persistence (random identifier + creation time).
++ *
++ * Public-key material is always read back from the Keystore; the store only
++ * persists the non-secret identifier and timestamp, so the two layers never
++ * need to agree on secret data.
++ *
++ * The installation identifier is a random [UUID] (122 bits of entropy from a
++ * cryptographically strong PRNG). It is never derived from IMEI, serial
++ * number, MAC address, advertising ID, or any hardware fingerprint.
++ */
++class DefaultInstallationIdentityRepository(
++    private val keyStore: InstallKeyStore,
++    private val identityStore: InstallationIdentityStore,
++    private val idGenerator: () -> String = { UUID.randomUUID().toString() },
++    private val clock: () -> Long = System::currentTimeMillis,
++) : InstallationIdentityRepository {
++
++    // Serializes provisioning so that concurrent first-use callers cannot
++    // observe an empty store simultaneously and mint multiple installation
++    // identifiers for the same key. It also prevents double key generation.
++    private val provisioningMutex = Mutex()
++
++    override suspend fun currentIdentity(): InstallationIdentity =
++        provisioningMutex.withLock {
++            val stored = identityStore.load()
++            val publicKey = keyStore.publicKey()
++
++            if (stored != null && publicKey != null) {
++                stored.toIdentity(publicKey)
++            } else {
++                // First launch, or the key/metadata pair became inconsistent
++                // (e.g. app data was cleared but the Keystore entry survived).
++                // Provision (or reuse) the key and persist a fresh identifier.
++                //
++                // Fail closed: if key provisioning or persistence throws, the
++                // exception propagates to the caller and no partial identity is
++                // returned or persisted. A partially provisioned key without
++                // metadata is reconciled on the next call.
++                val pem = keyStore.ensureKey()
++                val record = InstallationIdentityRecord(
++                    installationId = idGenerator(),
++                    createdAtEpochMs = clock(),
++                )
++                identityStore.save(record)
++                record.toIdentity(pem)
++            }
++        }
++}
++
++private fun InstallationIdentityRecord.toIdentity(publicKeyPem: String) = InstallationIdentity(
++    installationId = installationId,
++    publicKeyPem = publicKeyPem,
++    createdAtEpochMs = createdAtEpochMs,
++)
+diff --git a/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentity.kt b/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentity.kt
+new file mode 100644
+index 0000000..70ddee8
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentity.kt
+@@ -0,0 +1,20 @@
++package com.vexcompany.samvira.domain.identity
++
++/**
++ * Installation-based identity.
++ *
++ * The private key material lives (and stays) inside Android Keystore and is
++ * never exposed through this model. Only the public portion — the PEM public
++ * key — together with a random installation identifier is surfaced. Per the
++ * SAMVIRA security model:
++ *
++ *  - The identifier is random, not derived from IMEI/serial/MAC/advertising ID
++ *    or any hardware fingerprint.
++ *  - Uninstalling or factory-resetting creates a fresh identity; this model
++ *    does not claim permanent physical-device uniqueness.
++ */
++data class InstallationIdentity(
++    val installationId: String,
++    val publicKeyPem: String,
++    val createdAtEpochMs: Long,
++)
+diff --git a/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentityRepository.kt b/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentityRepository.kt
+new file mode 100644
+index 0000000..7b189d1
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/domain/identity/InstallationIdentityRepository.kt
+@@ -0,0 +1,21 @@
++package com.vexcompany.samvira.domain.identity
++
++/**
++ * Domain-level access to the installation identity.
++ *
++ * The server is the source of truth for authorization; this repository only
++ * provides the local, installation-scoped identity that the server may later
++ * bind to organization membership. No network registration happens here
++ * (that belongs to a future milestone).
++ */
++interface InstallationIdentityRepository {
++
++    /**
++     * Returns the current installation identity, provisioning it on first use.
++     *
++     * Fails closed: if the stored metadata and the Keystore key disagree (for
++     * example after a partial data wipe), a fresh identity is provisioned
++     * rather than returning an inconsistent one.
++     */
++    suspend fun currentIdentity(): InstallationIdentity
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/security/ScreenGuard.kt b/app/src/main/java/com/vexcompany/samvira/security/ScreenGuard.kt
+new file mode 100644
+index 0000000..50a537a
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/security/ScreenGuard.kt
+@@ -0,0 +1,29 @@
++package com.vexcompany.samvira.security
++
++import android.app.Activity
++import android.view.WindowManager
++
++/**
++ * Helper for enabling/disabling screenshot protection (FLAG_SECURE) on
++ * sensitive viewing surfaces.
++ *
++ * FLAG_SECURE is a deterrent for in-app screenshots and screen recording; it
++ * cannot stop external cameras, rooted/modified devices, or other out-of-band
++ * capture. The foundation does not render sensitive media yet, so no surface
++ * enables it by default — it is wired here so future viewer screens can opt in
++ * per privacy policy.
++ */
++object ScreenGuard {
++
++    fun enable(activity: Activity) = setSecure(activity, secure = true)
++
++    fun disable(activity: Activity) = setSecure(activity, secure = false)
++
++    private fun setSecure(activity: Activity, secure: Boolean) {
++        if (secure) {
++            activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        } else {
++            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
++        }
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/security/keystore/AndroidKeystoreInstallKeyStore.kt b/app/src/main/java/com/vexcompany/samvira/security/keystore/AndroidKeystoreInstallKeyStore.kt
+new file mode 100644
+index 0000000..312edb2
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/security/keystore/AndroidKeystoreInstallKeyStore.kt
+@@ -0,0 +1,93 @@
++package com.vexcompany.samvira.security.keystore
++
++import android.security.keystore.KeyGenParameterSpec
++import android.security.keystore.KeyProperties
++import java.security.KeyPairGenerator
++import java.security.KeyStore
++import java.security.Signature
++import java.security.spec.ECGenParameterSpec
++
++/**
++ * Android Keystore-backed [InstallKeyStore].
++ *
++ * Security properties of the generated key:
++ *  - EC P-256 (secp256r1) key pair generated inside the Android Keystore.
++ *  - The private key is non-exportable: [KeyGenParameterSpec.Builder] is never
++ *    given [KeyGenParameterSpec.Builder.setKeyExportable], so the key is bound
++ *    to the Keystore by default. The private key material never leaves the
++ *    Keystore; only the public certificate (and thus the public key) is read.
++ *  - Purpose is limited to SIGN/VERIFY, digest to SHA-256.
++ *  - A fixed alias is used, so the same installation always resolves to the
++ *    same key across restarts, and re-provisioning after an app-data wipe
++ *    reuses an existing Keystore entry instead of attempting to overwrite it.
++ */
++class AndroidKeystoreInstallKeyStore(
++    private val alias: String = DEFAULT_ALIAS,
++) : InstallKeyStore {
++
++    /**
++     * Ensures the key exists, creating it if necessary, and returns its
++     * PEM-encoded public key.
++     *
++     * Synchronized so that concurrent first-use callers cannot both observe
++     * the alias as absent and race to generate it (the second generation would
++     * fail with a Keystore exception). Repeated calls are idempotent.
++     */
++    @Synchronized
++    override fun ensureKey(): String {
++        val keyStore = keyStore()
++        if (!keyStore.containsAlias(alias)) {
++            val generator = KeyPairGenerator.getInstance(
++                KeyProperties.KEY_ALGORITHM_EC,
++                ANDROID_KEYSTORE,
++            )
++            generator.initialize(
++                KeyGenParameterSpec.Builder(
++                    alias,
++                    KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
++                )
++                    .setAlgorithmParameterSpec(ECGenParameterSpec(EC_CURVE))
++                    .setDigests(KeyProperties.DIGEST_SHA256)
++                    .build(),
++            )
++            generator.generateKeyPair()
++        }
++        return publicKey()
++            ?: throw IllegalStateException(
++                "Installation key exists but its public key could not be read.",
++            )
++    }
++
++    override fun publicKey(): String? {
++        val entry = keyStore().getEntry(alias, null) as? KeyStore.PrivateKeyEntry
++            ?: return null
++        val der = entry.certificate.publicKey.encoded ?: return null
++        return Pem.encodePublicKey(der)
++    }
++
++    /**
++     * Signs [data] with the installation key.
++     *
++     * The signature is computed inside the Keystore using ECDSA with SHA-256;
++     * the private key is never surfaced to the caller.
++     */
++    override fun sign(data: ByteArray): ByteArray {
++        val entry = keyStore().getEntry(alias, null) as? KeyStore.PrivateKeyEntry
++            ?: throw IllegalStateException("Installation key is not available.")
++        return Signature.getInstance(SIGNATURE_ALGORITHM).run {
++            initSign(entry.privateKey)
++            update(data)
++            sign()
++        }
++    }
++
++    private fun keyStore(): KeyStore =
++        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
++
++    private companion object {
++        const val ANDROID_KEYSTORE = "AndroidKeyStore"
++        const val DEFAULT_ALIAS = "samvira_installation_identity_v1"
++        const val EC_CURVE = "secp256r1"
++        const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/security/keystore/InstallKeyStore.kt b/app/src/main/java/com/vexcompany/samvira/security/keystore/InstallKeyStore.kt
+new file mode 100644
+index 0000000..2af4598
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/security/keystore/InstallKeyStore.kt
+@@ -0,0 +1,33 @@
++package com.vexcompany.samvira.security.keystore
++
++/**
++ * Abstraction over the installation signing key.
++ *
++ * The private key is generated inside Android Keystore and is never exported.
++ * Only the public key (PEM) and signature operations are exposed, which is all
++ * the identity layer needs to register with, and prove possession to, a server
++ * in a future milestone.
++ *
++ * Implementations are expected to fail loudly (throw) when the key cannot be
++ * created or used, so callers fail closed rather than continue without an
++ * identity.
++ */
++interface InstallKeyStore {
++
++    /**
++     * Ensures a non-exportable signing key exists, creating it if necessary,
++     * and returns its PEM-encoded public key.
++     */
++    fun ensureKey(): String
++
++    /** Returns the PEM public key, or `null` when no key exists yet. */
++    fun publicKey(): String?
++
++    /**
++     * Signs [data] with the installation key.
++     *
++     * Reserved for proof-of-possession / challenge-response authentication in
++     * a future milestone; not yet used by any product flow.
++     */
++    fun sign(data: ByteArray): ByteArray
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/security/keystore/Pem.kt b/app/src/main/java/com/vexcompany/samvira/security/keystore/Pem.kt
+new file mode 100644
+index 0000000..5d8d75d
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/security/keystore/Pem.kt
+@@ -0,0 +1,34 @@
++package com.vexcompany.samvira.security.keystore
++
++import java.util.Base64
++
++/**
++ * Pure PEM (RFC 7468) encoding for public keys.
++ *
++ * Kept free of Android dependencies so the serialization format can be
++ * unit-tested on the JVM and reused by any future non-Android consumer.
++ */
++object Pem {
++
++    private const val LINE_LENGTH = 64
++
++    /** Encodes a DER-encoded SubjectPublicKeyInfo as a "PUBLIC KEY" PEM block. */
++    fun encodePublicKey(der: ByteArray): String = encode("PUBLIC KEY", der)
++
++    /** Encodes [der] as a PEM block of the given [type] (e.g. "PUBLIC KEY"). */
++    fun encode(type: String, der: ByteArray): String {
++        val body = Base64.getEncoder()
++            .encodeToString(der)
++            .chunked(LINE_LENGTH)
++            .joinToString("\n")
++        return buildString {
++            append("-----BEGIN ")
++            append(type)
++            append("-----\n")
++            append(body)
++            append("\n-----END ")
++            append(type)
++            append("-----\n")
++        }
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/home/HomeScreen.kt b/app/src/main/java/com/vexcompany/samvira/ui/home/HomeScreen.kt
+new file mode 100644
+index 0000000..7f91877
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/home/HomeScreen.kt
+@@ -0,0 +1,213 @@
++package com.vexcompany.samvira.ui.home
++
++import androidx.compose.foundation.background
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.Card
++import androidx.compose.material3.CardDefaults
++import androidx.compose.material3.CircularProgressIndicator
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Text
++import androidx.compose.material3.TopAppBar
++import androidx.compose.material3.TopAppBarDefaults
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.tooling.preview.Preview
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.vexcompany.samvira.ui.theme.SamviraTheme
++import com.vexcompany.samvira.ui.theme.Teal400
++
++/**
++ * Foundation home screen: shows the SAMVIRA brand and the status of the
++ * foundation subsystems established for Milestone 0.1.
++ */
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun HomeScreen(viewModel: HomeViewModel) {
++    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
++    HomeContent(state = uiState)
++}
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++private fun HomeContent(state: HomeUiState) {
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("SAMVIRA", fontWeight = FontWeight.Bold) },
++                colors = TopAppBarDefaults.topAppBarColors(
++                    containerColor = MaterialTheme.colorScheme.background,
++                ),
++            )
++        },
++    ) { innerPadding ->
++        Column(
++            modifier = Modifier
++                .fillMaxSize()
++                .padding(innerPadding)
++                .verticalScroll(rememberScrollState())
++                .padding(horizontal = 24.dp, vertical = 16.dp),
++            verticalArrangement = Arrangement.spacedBy(16.dp),
++        ) {
++            Text(
++                text = "Privacy-first photo & memory viewer",
++                style = MaterialTheme.typography.titleLarge,
++                color = MaterialTheme.colorScheme.onBackground,
++            )
++            Text(
++                text = "Milestone 0.1 — Foundation",
++                style = MaterialTheme.typography.labelMedium,
++                color = MaterialTheme.colorScheme.primary,
++            )
++
++            FoundationStatusCard()
++
++            IdentityCard(state = state)
++
++            Text(
++                text = "View access is separate from download permission. " +
++                    "Screenshot protection cannot stop external cameras or " +
++                    "out-of-band capture.",
++                style = MaterialTheme.typography.labelMedium,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++            )
++        }
++    }
++}
++
++@Composable
++private fun FoundationStatusCard() {
++    Card(
++        modifier = Modifier.fillMaxWidth(),
++        colors = CardDefaults.cardColors(
++            containerColor = MaterialTheme.colorScheme.surfaceVariant,
++        ),
++    ) {
++        Column(
++            modifier = Modifier.padding(16.dp),
++            verticalArrangement = Arrangement.spacedBy(10.dp),
++        ) {
++            Text(
++                text = "Foundation status",
++                style = MaterialTheme.typography.titleLarge,
++            )
++            StatusRow("Compose & Material 3 shell")
++            StatusRow("Navigation host")
++            StatusRow("Local persistence abstraction (DataStore)")
++            StatusRow("Networking abstraction (OkHttp)")
++            StatusRow("Installation identity (Android Keystore)")
++        }
++    }
++}
++
++@Composable
++private fun StatusRow(label: String) {
++    Row(verticalAlignment = Alignment.CenterVertically) {
++        Box(
++            modifier = Modifier
++                .size(10.dp)
++                .background(Teal400, CircleShape),
++        )
++        Spacer(Modifier.width(12.dp))
++        Text(
++            text = label,
++            style = MaterialTheme.typography.bodyLarge,
++            color = MaterialTheme.colorScheme.onSurfaceVariant,
++        )
++    }
++}
++
++@Composable
++private fun IdentityCard(state: HomeUiState) {
++    Card(modifier = Modifier.fillMaxWidth()) {
++        Column(
++            modifier = Modifier.padding(16.dp),
++            verticalArrangement = Arrangement.spacedBy(10.dp),
++        ) {
++            Text(
++                text = "Installation identity",
++                style = MaterialTheme.typography.titleLarge,
++            )
++            when {
++                state.isLoading -> {
++                    Row(verticalAlignment = Alignment.CenterVertically) {
++                        CircularProgressIndicator(
++                            modifier = Modifier.size(20.dp),
++                            strokeWidth = 2.dp,
++                        )
++                        Spacer(Modifier.width(12.dp))
++                        Text(
++                            text = "Provisioning…",
++                            style = MaterialTheme.typography.bodyLarge,
++                        )
++                    }
++                }
++
++                state.error != null -> {
++                    Text(
++                        text = "Identity unavailable: ${state.error}",
++                        style = MaterialTheme.typography.bodyLarge,
++                        color = MaterialTheme.colorScheme.error,
++                    )
++                }
++
++                else -> {
++                    Text(
++                        text = "Ready",
++                        style = MaterialTheme.typography.bodyLarge,
++                        color = Teal400,
++                        fontWeight = FontWeight.SemiBold,
++                    )
++                    Text(
++                        text = "Installation ID: ${state.installationId.orEmpty().take(8)}…",
++                        style = MaterialTheme.typography.bodyLarge,
++                    )
++                    Text(
++                        text = "Key fingerprint: SHA-256 ${state.publicKeyFingerprint.orEmpty()}",
++                        style = MaterialTheme.typography.bodyLarge,
++                    )
++                    Spacer(Modifier.height(4.dp))
++                    Text(
++                        text = "The private key is generated in Android Keystore and " +
++                            "never leaves the device.",
++                        style = MaterialTheme.typography.labelMedium,
++                        color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    )
++                }
++            }
++        }
++    }
++}
++
++@Preview(showBackground = true)
++@Composable
++private fun HomeContentPreview() {
++    SamviraTheme {
++        HomeContent(
++            state = HomeUiState(
++                isLoading = false,
++                identityProvisioned = true,
++                installationId = "3f2a9c1e-0000-0000-0000-000000000000",
++                publicKeyFingerprint = "A1B2C3D4E5F60718",
++            ),
++        )
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/home/HomeViewModel.kt b/app/src/main/java/com/vexcompany/samvira/ui/home/HomeViewModel.kt
+new file mode 100644
+index 0000000..67d4d4f
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/home/HomeViewModel.kt
+@@ -0,0 +1,58 @@
++package com.vexcompany.samvira.ui.home
++
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.vexcompany.samvira.domain.identity.InstallationIdentityRepository
++import java.security.MessageDigest
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.launch
++
++/**
++ * UI state for the foundation home screen.
++ *
++ * The public key fingerprint is a non-secret hash of the public key, used only
++ * to give the user a compact, stable reference for their installation.
++ */
++data class HomeUiState(
++    val isLoading: Boolean = true,
++    val identityProvisioned: Boolean = false,
++    val installationId: String? = null,
++    val publicKeyFingerprint: String? = null,
++    val error: String? = null,
++)
++
++class HomeViewModel(
++    private val identityRepository: InstallationIdentityRepository,
++) : ViewModel() {
++
++    private val _uiState = MutableStateFlow(HomeUiState())
++    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
++
++    init {
++        viewModelScope.launch {
++            try {
++                val identity = identityRepository.currentIdentity()
++                _uiState.value = HomeUiState(
++                    isLoading = false,
++                    identityProvisioned = true,
++                    installationId = identity.installationId,
++                    publicKeyFingerprint = fingerprint(identity.publicKeyPem),
++                )
++            } catch (t: Throwable) {
++                _uiState.value = HomeUiState(
++                    isLoading = false,
++                    error = t.message ?: "Unknown error",
++                )
++            }
++        }
++    }
++
++    private fun fingerprint(pem: String): String {
++        val digest = MessageDigest.getInstance("SHA-256").digest(pem.toByteArray())
++        return digest.take(8).joinToString("") { byte ->
++            "%02X".format(byte.toInt() and 0xFF)
++        }
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/navigation/SamviraNavHost.kt b/app/src/main/java/com/vexcompany/samvira/ui/navigation/SamviraNavHost.kt
+new file mode 100644
+index 0000000..3354d4e
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/navigation/SamviraNavHost.kt
+@@ -0,0 +1,44 @@
++package com.vexcompany.samvira.ui.navigation
++
++import androidx.compose.runtime.Composable
++import androidx.lifecycle.viewmodel.compose.viewModel
++import androidx.navigation.NavHostController
++import androidx.navigation.compose.NavHost
++import androidx.navigation.compose.composable
++import androidx.navigation.compose.rememberNavController
++import com.vexcompany.samvira.core.di.AppContainer
++import com.vexcompany.samvira.ui.home.HomeScreen
++import com.vexcompany.samvira.ui.home.HomeViewModel
++
++/**
++ * Central navigation routes. Future product screens (albums, timelines, …)
++ * are added here; the foundation ships only the home/status destination.
++ */
++object Routes {
++    const val HOME = "home"
++}
++
++/**
++ * Navigation host for the single-activity Compose app.
++ *
++ * Only the foundation home destination exists today. The NavHost scaffolding
++ * keeps route/back-stack concerns in one place so future screens can be added
++ * without restructuring the activity.
++ */
++@Composable
++fun SamviraNavHost(
++    container: AppContainer,
++    navController: NavHostController = rememberNavController(),
++) {
++    NavHost(
++        navController = navController,
++        startDestination = Routes.HOME,
++    ) {
++        composable(Routes.HOME) {
++            val viewModel: HomeViewModel = viewModel {
++                HomeViewModel(identityRepository = container.identityRepository)
++            }
++            HomeScreen(viewModel = viewModel)
++        }
++    }
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/theme/Color.kt b/app/src/main/java/com/vexcompany/samvira/ui/theme/Color.kt
+new file mode 100644
+index 0000000..9243fe3
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/theme/Color.kt
+@@ -0,0 +1,25 @@
++package com.vexcompany.samvira.ui.theme
++
++import androidx.compose.ui.graphics.Color
++
++/**
++ * SAMVIRA brand palette (placeholder for the foundation milestone).
++ *
++ * Deep indigo signals trust and privacy; the teal and warm amber are accents.
++ * These values are intentional but not final — they can be replaced by a
++ * designer-provided palette without touching screen code, since screens only
++ * reference the semantic theme colors.
++ */
++val Indigo900 = Color(0xFF1B2A4A)
++val Indigo700 = Color(0xFF2A4073)
++val Indigo500 = Color(0xFF3A5BA0)
++val Teal400 = Color(0xFF26A69A)
++val Amber400 = Color(0xFFF5B942)
++
++val LightSurface = Color(0xFFF7F9FC)
++val LightOnSurface = Color(0xFF1B1F27)
++val LightSurfaceVariant = Color(0xFFE3E8F0)
++
++val DarkSurface = Color(0xFF12141A)
++val DarkOnSurface = Color(0xFFE7EAF0)
++val DarkSurfaceVariant = Color(0xFF232735)
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/theme/Theme.kt b/app/src/main/java/com/vexcompany/samvira/ui/theme/Theme.kt
+new file mode 100644
+index 0000000..1abf3c7
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/theme/Theme.kt
+@@ -0,0 +1,50 @@
++package com.vexcompany.samvira.ui.theme
++
++import androidx.compose.foundation.isSystemInDarkTheme
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.darkColorScheme
++import androidx.compose.material3.lightColorScheme
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.graphics.Color
++
++private val LightColors = lightColorScheme(
++    primary = Indigo700,
++    onPrimary = Color.White,
++    secondary = Teal400,
++    tertiary = Amber400,
++    background = LightSurface,
++    onBackground = LightOnSurface,
++    surface = LightSurface,
++    onSurface = LightOnSurface,
++    surfaceVariant = LightSurfaceVariant,
++)
++
++private val DarkColors = darkColorScheme(
++    primary = Indigo500,
++    onPrimary = Color.White,
++    secondary = Teal400,
++    tertiary = Amber400,
++    background = DarkSurface,
++    onBackground = DarkOnSurface,
++    surface = DarkSurface,
++    onSurface = DarkOnSurface,
++    surfaceVariant = DarkSurfaceVariant,
++)
++
++/**
++ * SAMVIRA theme.
++ *
++ * Dynamic (Material You) color is intentionally not used: SAMVIRA keeps a
++ * consistent brand identity across devices.
++ */
++@Composable
++fun SamviraTheme(
++    darkTheme: Boolean = isSystemInDarkTheme(),
++    content: @Composable () -> Unit,
++) {
++    MaterialTheme(
++        colorScheme = if (darkTheme) DarkColors else LightColors,
++        typography = SamviraTypography,
++        content = content,
++    )
++}
+diff --git a/app/src/main/java/com/vexcompany/samvira/ui/theme/Type.kt b/app/src/main/java/com/vexcompany/samvira/ui/theme/Type.kt
+new file mode 100644
+index 0000000..e01139e
+--- /dev/null
++++ b/app/src/main/java/com/vexcompany/samvira/ui/theme/Type.kt
+@@ -0,0 +1,39 @@
++package com.vexcompany.samvira.ui.theme
++
++import androidx.compose.material3.Typography
++import androidx.compose.ui.text.TextStyle
++import androidx.compose.ui.text.font.FontFamily
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.sp
++
++/**
++ * Typography for SAMVIRA. Minimal overrides on top of the Material 3 defaults;
++ * kept here so future brand typography has a single home.
++ */
++val SamviraTypography = Typography(
++    headlineLarge = TextStyle(
++        fontFamily = FontFamily.SansSerif,
++        fontWeight = FontWeight.Bold,
++        fontSize = 34.sp,
++        lineHeight = 40.sp,
++        letterSpacing = 0.5.sp,
++    ),
++    titleLarge = TextStyle(
++        fontFamily = FontFamily.SansSerif,
++        fontWeight = FontWeight.SemiBold,
++        fontSize = 22.sp,
++        lineHeight = 28.sp,
++    ),
++    bodyLarge = TextStyle(
++        fontFamily = FontFamily.SansSerif,
++        fontWeight = FontWeight.Normal,
++        fontSize = 16.sp,
++        lineHeight = 24.sp,
++    ),
++    labelMedium = TextStyle(
++        fontFamily = FontFamily.SansSerif,
++        fontWeight = FontWeight.Medium,
++        fontSize = 12.sp,
++        letterSpacing = 0.4.sp,
++    ),
++)
+diff --git a/app/src/main/res/drawable/ic_launcher_foreground.xml b/app/src/main/res/drawable/ic_launcher_foreground.xml
+new file mode 100644
+index 0000000..174fb18
+--- /dev/null
++++ b/app/src/main/res/drawable/ic_launcher_foreground.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="108dp"
++    android:height="108dp"
++    android:viewportWidth="108"
++    android:viewportHeight="108">
++    <!-- Shield: SAMVIRA is a privacy-first viewer. -->
++    <path
++        android:fillColor="#FFFFFF"
++        android:pathData="M54,24 L78,33 L78,52 C78,68 67,81 54,86 C41,81 30,68 30,52 L30,33 Z" />
++    <!-- Aperture/memory mark. -->
++    <path
++        android:fillColor="#1B2A4A"
++        android:pathData="M54,46 a9,9 0 1,1 0,18 a9,9 0 1,1 0,-18" />
++</vector>
+diff --git a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+new file mode 100644
+index 0000000..a8a8fa5
+--- /dev/null
++++ b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/ic_launcher_background" />
++    <foreground android:drawable="@drawable/ic_launcher_foreground" />
++</adaptive-icon>
+diff --git a/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml b/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+new file mode 100644
+index 0000000..a8a8fa5
+--- /dev/null
++++ b/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
++    <background android:drawable="@color/ic_launcher_background" />
++    <foreground android:drawable="@drawable/ic_launcher_foreground" />
++</adaptive-icon>
+diff --git a/app/src/main/res/values/colors.xml b/app/src/main/res/values/colors.xml
+new file mode 100644
+index 0000000..7d2b011
+--- /dev/null
++++ b/app/src/main/res/values/colors.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Brand background for the adaptive launcher icon. -->
++    <color name="ic_launcher_background">#1B2A4A</color>
++</resources>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+new file mode 100644
+index 0000000..80dc7b6
+--- /dev/null
++++ b/app/src/main/res/values/strings.xml
+@@ -0,0 +1,3 @@
++<resources>
++    <string name="app_name">SAMVIRA</string>
++</resources>
+diff --git a/app/src/main/res/values/themes.xml b/app/src/main/res/values/themes.xml
+new file mode 100644
+index 0000000..b00e2b6
+--- /dev/null
++++ b/app/src/main/res/values/themes.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Compose draws the UI; this platform theme only sets the window basics. -->
++    <style name="Theme.Samvira" parent="android:Theme.Material.Light.NoActionBar" />
++</resources>
+diff --git a/app/src/test/java/com/vexcompany/samvira/core/logging/ScrubberTest.kt b/app/src/test/java/com/vexcompany/samvira/core/logging/ScrubberTest.kt
+new file mode 100644
+index 0000000..864cbd5
+--- /dev/null
++++ b/app/src/test/java/com/vexcompany/samvira/core/logging/ScrubberTest.kt
+@@ -0,0 +1,110 @@
++package com.vexcompany.samvira.core.logging
++
++import org.junit.Assert.assertArrayEquals
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class ScrubberTest {
++
++    @Test
++    fun `redacts authorization headers`() {
++        val result = Scrubber.redact("Authorization: Bearer abc.def-123")
++        assertTrue(result.contains("<redacted>"))
++        assertFalse(result.contains("abc.def-123"))
++    }
++
++    @Test
++    fun `redacts basic authorization headers`() {
++        val result = Scrubber.redact("Authorization: Basic dXNlcjpwYXNzd29yZA==")
++        assertTrue(result.contains("<redacted>"))
++        assertFalse(result.contains("dXNlcjpwYXNzd29yZA=="))
++    }
++
++    @Test
++    fun `redacts bare bearer tokens`() {
++        val result = Scrubber.redact("request failed for Bearer abcdef123456")
++        assertTrue(result.contains("<redacted>"))
++        assertFalse(result.contains("abcdef123456"))
++    }
++
++    @Test
++    fun `redacts key value credentials`() {
++        val result = Scrubber.redact("api_key=sekrit access_token=zzz password: hunter2")
++        assertFalse(result.contains("sekrit"))
++        assertFalse(result.contains("zzz"))
++        assertFalse(result.contains("hunter2"))
++    }
++
++    @Test
++    fun `redacts client secret and session identifiers`() {
++        val result = Scrubber.redact("client_secret=abcd1234 session_id=deadbeef credential=top")
++        assertFalse(result.contains("abcd1234"))
++        assertFalse(result.contains("deadbeef"))
++        assertFalse(result.contains("top"))
++    }
++
++    @Test
++    fun `redacts query string credentials without swallowing the url`() {
++        val result = Scrubber.redact("https://example.com/photos?token=TOPSECRET&page=2")
++        assertFalse(result.contains("TOPSECRET"))
++        assertTrue(result.contains("<redacted>"))
++        assertTrue(result.contains("&page=2"))
++        assertTrue(result.contains("https://example.com/photos?"))
++    }
++
++    @Test
++    fun `redacts url userinfo while preserving scheme and host`() {
++        val result = Scrubber.redact("https://alice:s3cr3t@example.com/gallery")
++        assertEquals("https://<redacted>@example.com/gallery", result)
++        assertFalse(result.contains("s3cr3t"))
++    }
++
++    @Test
++    fun `redacts pem private keys`() {
++        val pem = """
++            -----BEGIN PRIVATE KEY-----
++            MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7
++            -----END PRIVATE KEY-----
++        """.trimIndent()
++        val result = Scrubber.redact("key material follows:\n$pem")
++        assertTrue(result.contains("<redacted>"))
++        assertFalse(result.contains("MIIEvQIBADAN"))
++    }
++
++    @Test
++    fun `leaves benign text untouched`() {
++        assertEquals("hello world", Scrubber.redact("hello world"))
++        assertEquals("loading album 42", Scrubber.redact("loading album 42"))
++    }
++
++    @Test
++    fun `does not over-redact words containing secret-like substrings`() {
++        val input = "tokenization of credentials-list requires authorization review"
++        assertEquals(input, Scrubber.redact(input))
++    }
++
++    @Test
++    fun `does not redact url host or port`() {
++        val input = "https://example.com:8080/path"
++        assertEquals(input, Scrubber.redact(input))
++    }
++
++    @Test
++    fun `sanitizeThrowable redacts message and preserves stack trace`() {
++        val original = RuntimeException("auth failed token=SECRET")
++        val sanitized = Scrubber.sanitizeThrowable(original)
++
++        assertTrue(sanitized != null)
++        assertTrue(sanitized!!.message!!.contains("<redacted>"))
++        assertFalse(sanitized.message!!.contains("SECRET"))
++        assertArrayEquals(original.stackTrace, sanitized.stackTrace)
++    }
++
++    @Test
++    fun `sanitizeThrowable returns null for null input`() {
++        assertNull(Scrubber.sanitizeThrowable(null))
++    }
++}
+diff --git a/app/src/test/java/com/vexcompany/samvira/data/network/OkHttpNetworkClientTest.kt b/app/src/test/java/com/vexcompany/samvira/data/network/OkHttpNetworkClientTest.kt
+new file mode 100644
+index 0000000..8730ce2
+--- /dev/null
++++ b/app/src/test/java/com/vexcompany/samvira/data/network/OkHttpNetworkClientTest.kt
+@@ -0,0 +1,153 @@
++package com.vexcompany.samvira.data.network
++
++import com.vexcompany.samvira.core.logging.AppLogger
++import java.util.concurrent.TimeUnit
++import kotlinx.coroutines.test.runTest
++import okhttp3.OkHttpClient
++import okhttp3.mockwebserver.MockResponse
++import okhttp3.mockwebserver.MockWebServer
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Before
++import org.junit.Test
++
++class OkHttpNetworkClientTest {
++
++    private lateinit var server: MockWebServer
++    private lateinit var client: OkHttpNetworkClient
++
++    @Before
++    fun setUp() {
++        server = MockWebServer()
++        server.start()
++        client = OkHttpNetworkClient(client = OkHttpClient())
++    }
++
++    @After
++    fun tearDown() {
++        server.shutdown()
++    }
++
++    @Test
++    fun `returns success with status body and headers`() = runTest {
++        server.enqueue(
++            MockResponse()
++                .setResponseCode(200)
++                .setBody("ok")
++                .addHeader("Content-Type", "text/plain"),
++        )
++
++        val result = client.execute(
++            NetworkRequest(
++                method = NetworkRequest.Method.GET,
++                url = server.url("/ping").toString(),
++            ),
++        )
++
++        assertTrue(result is NetworkResult.Success)
++        val success = result as NetworkResult.Success
++        assertEquals(200, success.statusCode)
++        assertEquals("ok", String(success.body))
++        assertEquals("text/plain", success.headers["Content-Type"])
++    }
++
++    @Test
++    fun `maps non-2xx responses to HTTP_ERROR failure`() = runTest {
++        server.enqueue(MockResponse().setResponseCode(404).setBody("missing"))
++
++        val result = client.execute(
++            NetworkRequest(
++                method = NetworkRequest.Method.GET,
++                url = server.url("/nope").toString(),
++            ),
++        )
++
++        assertTrue(result is NetworkResult.Failure)
++        val failure = result as NetworkResult.Failure
++        assertEquals(FailureReason.HTTP_ERROR, failure.reason)
++        assertEquals("HTTP 404", failure.message)
++    }
++
++    @Test
++    fun `maps connection failure to CONNECTIVITY`() = runTest {
++        val url = server.url("/unreachable").toString()
++        server.shutdown()
++
++        val result = client.execute(
++            NetworkRequest(
++                method = NetworkRequest.Method.GET,
++                url = url,
++            ),
++        )
++
++        assertTrue(result is NetworkResult.Failure)
++        val failure = result as NetworkResult.Failure
++        assertEquals(FailureReason.CONNECTIVITY, failure.reason)
++    }
++
++    @Test
++    fun `maps read timeout to TIMEOUT`() = runTest {
++        val timeoutClient = OkHttpNetworkClient(
++            client = OkHttpClient.Builder()
++                .readTimeout(200, TimeUnit.MILLISECONDS)
++                .build(),
++        )
++        server.enqueue(
++            MockResponse()
++                .setResponseCode(200)
++                .setBody("slow response")
++                .setBodyDelay(2, TimeUnit.SECONDS),
++        )
++
++        val result = timeoutClient.execute(
++            NetworkRequest(
++                method = NetworkRequest.Method.GET,
++                url = server.url("/slow").toString(),
++            ),
++        )
++
++        assertTrue(result is NetworkResult.Failure)
++        val failure = result as NetworkResult.Failure
++        assertEquals(FailureReason.TIMEOUT, failure.reason)
++    }
++
++    @Test
++    fun `does not log sensitive query material on failure`() = runTest {
++        val logs = mutableListOf<String>()
++        val recordingLogger = RecordingLogger(logs)
++        val recordingClient = OkHttpNetworkClient(client = OkHttpClient(), logger = recordingLogger)
++
++        val url = server.url("/secure").toString()
++        server.shutdown()
++        val sensitiveUrl = "$url?token=SUPERSECRETTOKEN&access_token=ALSO_SECRET"
++
++        val result = recordingClient.execute(
++            NetworkRequest(method = NetworkRequest.Method.GET, url = sensitiveUrl),
++        )
++
++        assertTrue(result is NetworkResult.Failure)
++        assertTrue(logs.isNotEmpty())
++        assertTrue(logs.none { it.contains("SUPERSECRETTOKEN") })
++        assertTrue(logs.none { it.contains("ALSO_SECRET") })
++        assertTrue(logs.any { it.contains("<redacted>") })
++    }
++
++    private class RecordingLogger(private val sink: MutableList<String>) : AppLogger {
++        override fun debug(tag: String, message: String, throwable: Throwable?) {
++            sink += message
++        }
++
++        override fun info(tag: String, message: String, throwable: Throwable?) {
++            sink += message
++        }
++
++        override fun warn(tag: String, message: String, throwable: Throwable?) {
++            sink += message
++        }
++
++        override fun error(tag: String, message: String, throwable: Throwable?) {
++            sink += message
++        }
++    }
++}
+diff --git a/app/src/test/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepositoryTest.kt b/app/src/test/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepositoryTest.kt
+new file mode 100644
+index 0000000..8a34d45
+--- /dev/null
++++ b/app/src/test/java/com/vexcompany/samvira/domain/identity/DefaultInstallationIdentityRepositoryTest.kt
+@@ -0,0 +1,208 @@
++package com.vexcompany.samvira.domain.identity
++
++import com.vexcompany.samvira.data.identity.InstallationIdentityRecord
++import com.vexcompany.samvira.data.identity.InstallationIdentityStore
++import com.vexcompany.samvira.security.keystore.InstallKeyStore
++import java.io.IOException
++import java.util.concurrent.atomic.AtomicInteger
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.test.runTest
++import kotlinx.coroutines.yield
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class DefaultInstallationIdentityRepositoryTest {
++
++    @Test
++    fun `provisions identity on first access`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = null)
++        val store = InMemoryIdentityStore()
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "fixed-installation-id" },
++            clock = { 1234L },
++        )
++
++        val identity = repository.currentIdentity()
++
++        assertEquals("fixed-installation-id", identity.installationId)
++        assertEquals(FakeInstallKeyStore.DEFAULT_PEM, identity.publicKeyPem)
++        assertEquals(1234L, identity.createdAtEpochMs)
++        assertEquals(1, keyStore.ensureKeyCalls)
++        assertEquals("fixed-installation-id", store.record?.installationId)
++    }
++
++    @Test
++    fun `returns existing identity without regenerating`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = FakeInstallKeyStore.DEFAULT_PEM)
++        val store = InMemoryIdentityStore().apply {
++            record = InstallationIdentityRecord(
++                installationId = "existing-id",
++                createdAtEpochMs = 99L,
++            )
++        }
++        val repository = DefaultInstallationIdentityRepository(keyStore, store)
++
++        val identity = repository.currentIdentity()
++
++        assertEquals("existing-id", identity.installationId)
++        assertEquals(99L, identity.createdAtEpochMs)
++        assertEquals(FakeInstallKeyStore.DEFAULT_PEM, identity.publicKeyPem)
++        assertEquals(0, keyStore.ensureKeyCalls)
++        assertEquals("existing-id", store.record?.installationId)
++    }
++
++    @Test
++    fun `re-provisions when metadata exists but key is missing`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = null)
++        val store = InMemoryIdentityStore().apply {
++            record = InstallationIdentityRecord(
++                installationId = "stale-id",
++                createdAtEpochMs = 5L,
++            )
++        }
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "fresh-id" },
++            clock = { 500L },
++        )
++
++        val identity = repository.currentIdentity()
++
++        assertEquals("fresh-id", identity.installationId)
++        assertEquals(500L, identity.createdAtEpochMs)
++        assertEquals(1, keyStore.ensureKeyCalls)
++        assertEquals("fresh-id", store.record?.installationId)
++    }
++
++    @Test
++    fun `re-provisions when key exists but metadata is missing`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = FakeInstallKeyStore.DEFAULT_PEM)
++        val store = InMemoryIdentityStore()
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "recovered-id" },
++            clock = { 7L },
++        )
++
++        val identity = repository.currentIdentity()
++
++        assertEquals("recovered-id", identity.installationId)
++        assertNotNull(store.record)
++        assertEquals(FakeInstallKeyStore.DEFAULT_PEM, keyStore.publicKey())
++        assertEquals(1, keyStore.ensureKeyCalls)
++    }
++
++    @Test
++    fun `concurrent initialization produces a single identity`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = null)
++        val store = InMemoryIdentityStore(yieldOnAccess = true)
++        val idCounter = AtomicInteger(0)
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "id-${idCounter.incrementAndGet()}" },
++            clock = { 42L },
++        )
++
++        val identities = (1..32).map { async { repository.currentIdentity() } }.awaitAll()
++
++        assertEquals(1, keyStore.ensureKeyCalls)
++        assertEquals(1, store.saveCalls)
++        assertTrue(identities.all { it.installationId == "id-1" })
++        assertTrue(identities.all { it.publicKeyPem == FakeInstallKeyStore.DEFAULT_PEM })
++        assertTrue(identities.all { it.createdAtEpochMs == 42L })
++    }
++
++    @Test
++    fun `fails closed when key provisioning throws`() = runTest {
++        val keyStore = object : InstallKeyStore {
++            override fun ensureKey(): String = throw IllegalStateException("keystore unavailable")
++            override fun publicKey(): String? = null
++            override fun sign(data: ByteArray): ByteArray = throw UnsupportedOperationException()
++        }
++        val store = InMemoryIdentityStore()
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "never-used" },
++            clock = { 0L },
++        )
++
++        val thrown = runCatching { repository.currentIdentity() }.exceptionOrNull()
++
++        assertTrue(thrown is IllegalStateException)
++        assertNull(store.record)
++        assertEquals(0, store.saveCalls)
++    }
++
++    @Test
++    fun `fails closed when persistence save throws`() = runTest {
++        val keyStore = FakeInstallKeyStore(existingPem = null)
++        val store = object : InstallationIdentityStore {
++            override suspend fun load(): InstallationIdentityRecord? = null
++            override suspend fun save(record: InstallationIdentityRecord) {
++                throw IOException("disk unavailable")
++            }
++        }
++        val repository = DefaultInstallationIdentityRepository(
++            keyStore = keyStore,
++            identityStore = store,
++            idGenerator = { "id" },
++            clock = { 1L },
++        )
++
++        val thrown = runCatching { repository.currentIdentity() }.exceptionOrNull()
++
++        assertTrue(thrown is IOException)
++    }
++
++    private class FakeInstallKeyStore(private var existingPem: String?) : InstallKeyStore {
++
++        var ensureKeyCalls = 0
++            private set
++
++        override fun ensureKey(): String {
++            ensureKeyCalls++
++            val pem = existingPem ?: DEFAULT_PEM
++            existingPem = pem
++            return pem
++        }
++
++        override fun publicKey(): String? = existingPem
++
++        override fun sign(data: ByteArray): ByteArray = data
++
++        companion object {
++            const val DEFAULT_PEM =
++                "-----BEGIN PUBLIC KEY-----\nZmFrZQ==\n-----END PUBLIC KEY-----\n"
++        }
++    }
++
++    private class InMemoryIdentityStore(
++        private val yieldOnAccess: Boolean = false,
++    ) : InstallationIdentityStore {
++
++        var record: InstallationIdentityRecord? = null
++        var saveCalls = 0
++            private set
++
++        override suspend fun load(): InstallationIdentityRecord? {
++            if (yieldOnAccess) yield()
++            return record
++        }
++
++        override suspend fun save(record: InstallationIdentityRecord) {
++            if (yieldOnAccess) yield()
++            saveCalls++
++            this.record = record
++        }
++    }
++}
+diff --git a/app/src/test/java/com/vexcompany/samvira/security/keystore/PemTest.kt b/app/src/test/java/com/vexcompany/samvira/security/keystore/PemTest.kt
+new file mode 100644
+index 0000000..4db38b0
+--- /dev/null
++++ b/app/src/test/java/com/vexcompany/samvira/security/keystore/PemTest.kt
+@@ -0,0 +1,40 @@
++package com.vexcompany.samvira.security.keystore
++
++import java.util.Base64
++import org.junit.Assert.assertArrayEquals
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class PemTest {
++
++    @Test
++    fun `encoded public key round-trips to the original der bytes`() {
++        val der = ByteArray(65) { index -> (index * 7).toByte() }
++
++        val pem = Pem.encodePublicKey(der)
++
++        assertTrue(pem.startsWith("-----BEGIN PUBLIC KEY-----\n"))
++        assertTrue(pem.endsWith("\n-----END PUBLIC KEY-----\n"))
++
++        val body = pem
++            .removePrefix("-----BEGIN PUBLIC KEY-----\n")
++            .removeSuffix("\n-----END PUBLIC KEY-----\n")
++            .replace("\n", "")
++        assertArrayEquals(der, Base64.getDecoder().decode(body))
++    }
++
++    @Test
++    fun `base64 body is wrapped at the standard 64 character boundary`() {
++        val der = ByteArray(200) { index -> (index % 251).toByte() }
++
++        val pem = Pem.encodePublicKey(der)
++
++        val body = pem
++            .substringAfter("-----BEGIN PUBLIC KEY-----\n")
++            .substringBefore("\n-----END PUBLIC KEY-----")
++        val lines = body.split("\n")
++        assertTrue(lines.size > 1)
++        assertTrue(lines.dropLast(1).all { it.length == 64 })
++    }
++}
+diff --git a/build.gradle.kts b/build.gradle.kts
+new file mode 100644
+index 0000000..5c98ad0
+--- /dev/null
++++ b/build.gradle.kts
+@@ -0,0 +1,6 @@
++// Top-level build file where you can add configuration options common to all sub-projects/modules.
++plugins {
++    alias(libs.plugins.android.application) apply false
++    alias(libs.plugins.kotlin.android) apply false
++    alias(libs.plugins.kotlin.compose) apply false
++}
+diff --git a/gradle.properties b/gradle.properties
+new file mode 100644
+index 0000000..c5341e1
+--- /dev/null
++++ b/gradle.properties
+@@ -0,0 +1,15 @@
++# JVM arguments for the Gradle daemon.
++org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
++
++# AndroidX is required for Jetpack libraries.
++android.useAndroidX=true
++
++# Only generate R classes for the module that references them (faster, cleaner builds).
++android.nonTransitiveRClass=true
++
++# Kotlin code style.
++kotlin.code.style=official
++
++# Build performance.
++org.gradle.parallel=true
++org.gradle.caching=true
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+new file mode 100644
+index 0000000..2587c3f
+--- /dev/null
++++ b/gradle/libs.versions.toml
+@@ -0,0 +1,50 @@
++[versions]
++agp = "8.5.2"
++kotlin = "2.0.21"
++coreKtx = "1.13.1"
++composeBom = "2024.06.00"
++activityCompose = "1.9.0"
++lifecycle = "2.8.0"
++navigationCompose = "2.7.7"
++datastore = "1.1.1"
++coroutines = "1.8.1"
++okhttp = "4.12.0"
++junit = "4.13.2"
++androidxJunit = "1.2.1"
++espressoCore = "3.6.1"
++androidxTestRunner = "1.6.1"
++
++[libraries]
++androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
++androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
++androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
++androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
++androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
++androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
++androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
++androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
++
++androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
++androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
++androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
++androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
++androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
++androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
++androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
++androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
++
++kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
++kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
++kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
++okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
++okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
++
++junit = { group = "junit", name = "junit", version.ref = "junit" }
++androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
++androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
++androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
++
++[plugins]
++android-application = { id = "com.android.application", version.ref = "agp" }
++kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
++kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+diff --git a/gradle/wrapper/gradle-wrapper.jar b/gradle/wrapper/gradle-wrapper.jar
+new file mode 100644
+index 0000000..e644113
+Binary files /dev/null and b/gradle/wrapper/gradle-wrapper.jar differ
+diff --git a/gradle/wrapper/gradle-wrapper.properties b/gradle/wrapper/gradle-wrapper.properties
+new file mode 100644
+index 0000000..59f7b83
+--- /dev/null
++++ b/gradle/wrapper/gradle-wrapper.properties
+@@ -0,0 +1,8 @@
++distributionBase=GRADLE_USER_HOME
++distributionPath=wrapper/dists
++distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
++networkTimeout=10000
++validateDistributionUrl=true
++zipStoreBase=GRADLE_USER_HOME
++zipStorePath=wrapper/dists
++distributionSha256Sum=544c35d6bd849ae8a5ed0bcea39ba677dc40f49df7d1835561582da2009b961d
+diff --git a/gradlew b/gradlew
+new file mode 100755
+index 0000000..97de990
+--- /dev/null
++++ b/gradlew
+@@ -0,0 +1,249 @@
++#!/bin/sh
++
++#
++# Copyright © 2015-2021 the original authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++
++##############################################################################
++#
++#   Gradle start up script for POSIX generated by Gradle.
++#
++#   Important for running:
++#
++#   (1) You need a POSIX-compliant shell to run this script. If your /bin/sh is
++#       noncompliant, but you have some other compliant shell such as ksh or
++#       bash, then to run this script, type that shell name before the whole
++#       command line, like:
++#
++#           ksh Gradle
++#
++#       Busybox and similar reduced shells will NOT work, because this script
++#       requires all of these POSIX shell features:
++#         * functions;
++#         * expansions «$var», «${var}», «${var:-default}», «${var+SET}»,
++#           «${var#prefix}», «${var%suffix}», and «$( cmd )»;
++#         * compound commands having a testable exit status, especially «case»;
++#         * various built-in commands including «command», «set», and «ulimit».
++#
++#   Important for patching:
++#
++#   (2) This script targets any POSIX shell, so it avoids extensions provided
++#       by Bash, Ksh, etc; in particular arrays are avoided.
++#
++#       The "traditional" practice of packing multiple parameters into a
++#       space-separated string is a well documented source of bugs and security
++#       problems, so this is (mostly) avoided, by progressively accumulating
++#       options in "$@", and eventually passing that to Java.
++#
++#       Where the inherited environment variables (DEFAULT_JVM_OPTS, JAVA_OPTS,
++#       and GRADLE_OPTS) rely on word-splitting, this is performed explicitly;
++#       see the in-line comments for details.
++#
++#       There are tweaks for specific operating systems such as AIX, CygWin,
++#       Darwin, MinGW, and NonStop.
++#
++#   (3) This script is generated from the Groovy template
++#       https://github.com/gradle/gradle/blob/HEAD/subprojects/plugins/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt
++#       within the Gradle project.
++#
++#       You can find Gradle at https://github.com/gradle/gradle/.
++#
++##############################################################################
++
++# Attempt to set APP_HOME
++
++# Resolve links: $0 may be a link
++app_path=$0
++
++# Need this for daisy-chained symlinks.
++while
++    APP_HOME=${app_path%"${app_path##*/}"}  # leaves a trailing /; empty if no leading path
++    [ -h "$app_path" ]
++do
++    ls=$( ls -ld "$app_path" )
++    link=${ls#*' -> '}
++    case $link in             #(
++      /*)   app_path=$link ;; #(
++      *)    app_path=$APP_HOME$link ;;
++    esac
++done
++
++# This is normally unused
++# shellcheck disable=SC2034
++APP_BASE_NAME=${0##*/}
++# Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
++APP_HOME=$( cd "${APP_HOME:-./}" > /dev/null && pwd -P ) || exit
++
++# Use the maximum available, or set MAX_FD != -1 to use that value.
++MAX_FD=maximum
++
++warn () {
++    echo "$*"
++} >&2
++
++die () {
++    echo
++    echo "$*"
++    echo
++    exit 1
++} >&2
++
++# OS specific support (must be 'true' or 'false').
++cygwin=false
++msys=false
++darwin=false
++nonstop=false
++case "$( uname )" in                #(
++  CYGWIN* )         cygwin=true  ;; #(
++  Darwin* )         darwin=true  ;; #(
++  MSYS* | MINGW* )  msys=true    ;; #(
++  NONSTOP* )        nonstop=true ;;
++esac
++
++CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
++
++
++# Determine the Java command to use to start the JVM.
++if [ -n "$JAVA_HOME" ] ; then
++    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
++        # IBM's JDK on AIX uses strange locations for the executables
++        JAVACMD=$JAVA_HOME/jre/sh/java
++    else
++        JAVACMD=$JAVA_HOME/bin/java
++    fi
++    if [ ! -x "$JAVACMD" ] ; then
++        die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
++
++Please set the JAVA_HOME variable in your environment to match the
++location of your Java installation."
++    fi
++else
++    JAVACMD=java
++    if ! command -v java >/dev/null 2>&1
++    then
++        die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
++
++Please set the JAVA_HOME variable in your environment to match the
++location of your Java installation."
++    fi
++fi
++
++# Increase the maximum file descriptors if we can.
++if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
++    case $MAX_FD in #(
++      max*)
++        # In POSIX sh, ulimit -H is undefined. That's why the result is checked to see if it worked.
++        # shellcheck disable=SC2039,SC3045
++        MAX_FD=$( ulimit -H -n ) ||
++            warn "Could not query maximum file descriptor limit"
++    esac
++    case $MAX_FD in  #(
++      '' | soft) :;; #(
++      *)
++        # In POSIX sh, ulimit -n is undefined. That's why the result is checked to see if it worked.
++        # shellcheck disable=SC2039,SC3045
++        ulimit -n "$MAX_FD" ||
++            warn "Could not set maximum file descriptor limit to $MAX_FD"
++    esac
++fi
++
++# Collect all arguments for the java command, stacking in reverse order:
++#   * args from the command line
++#   * the main class name
++#   * -classpath
++#   * -D...appname settings
++#   * --module-path (only if needed)
++#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
++
++# For Cygwin or MSYS, switch paths to Windows format before running java
++if "$cygwin" || "$msys" ; then
++    APP_HOME=$( cygpath --path --mixed "$APP_HOME" )
++    CLASSPATH=$( cygpath --path --mixed "$CLASSPATH" )
++
++    JAVACMD=$( cygpath --unix "$JAVACMD" )
++
++    # Now convert the arguments - kludge to limit ourselves to /bin/sh
++    for arg do
++        if
++            case $arg in                                #(
++              -*)   false ;;                            # don't mess with options #(
++              /?*)  t=${arg#/} t=/${t%%/*}              # looks like a POSIX filepath
++                    [ -e "$t" ] ;;                      #(
++              *)    false ;;
++            esac
++        then
++            arg=$( cygpath --path --ignore --mixed "$arg" )
++        fi
++        # Roll the args list around exactly as many times as the number of
++        # args, so each arg winds up back in the position where it started, but
++        # possibly modified.
++        #
++        # NB: a `for` loop captures its iteration list before it begins, so
++        # changing the positional parameters here affects neither the number of
++        # iterations, nor the values presented in `arg`.
++        shift                   # remove old arg
++        set -- "$@" "$arg"      # push replacement arg
++    done
++fi
++
++
++# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
++DEFAULT_JVM_OPTS='-Dfile.encoding=UTF-8 "-Xmx64m" "-Xms64m"'
++
++# Collect all arguments for the java command:
++#   * DEFAULT_JVM_OPTS, JAVA_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,
++#     and any embedded shellness will be escaped.
++#   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
++#     treated as '${Hostname}' itself on the command line.
++
++set -- \
++        "-Dorg.gradle.appname=$APP_BASE_NAME" \
++        -classpath "$CLASSPATH" \
++        org.gradle.wrapper.GradleWrapperMain \
++        "$@"
++
++# Stop when "xargs" is not available.
++if ! command -v xargs >/dev/null 2>&1
++then
++    die "xargs is not available"
++fi
++
++# Use "xargs" to parse quoted args.
++#
++# With -n1 it outputs one arg per line, with the quotes and backslashes removed.
++#
++# In Bash we could simply go:
++#
++#   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
++#   set -- "${ARGS[@]}" "$@"
++#
++# but POSIX shell has neither arrays nor command substitution, so instead we
++# post-process each arg (as a line of input to sed) to backslash-escape any
++# character that might be a shell metacharacter, then use eval to reverse
++# that process (while maintaining the separation between arguments), and wrap
++# the whole thing up as a single "set" statement.
++#
++# This will of course break if any of these variables contains a newline or
++# an unmatched quote.
++#
++
++eval "set -- $(
++        printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
++        xargs -n1 |
++        sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
++        tr '\n' ' '
++    )" '"$@"'
++
++exec "$JAVACMD" "$@"
+diff --git a/gradlew.bat b/gradlew.bat
+new file mode 100644
+index 0000000..66f1aa7
+--- /dev/null
++++ b/gradlew.bat
+@@ -0,0 +1,92 @@
++@rem
++@rem Copyright 2015 the original author or authors.
++@rem
++@rem Licensed under the Apache License, Version 2.0 (the "License");
++@rem you may not use this file except in compliance with the License.
++@rem You may obtain a copy of the License at
++@rem
++@rem      https://www.apache.org/licenses/LICENSE-2.0
++@rem
++@rem Unless required by applicable law or agreed to in writing, software
++@rem distributed under the License is distributed on an "AS IS" BASIS,
++@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++@rem See the License for the specific language governing permissions and
++@rem limitations under the License.
++@rem
++
++@if "%DEBUG%"=="" @echo off
++@rem ##########################################################################
++@rem
++@rem  Gradle startup script for Windows
++@rem
++@rem ##########################################################################
++
++@rem Set local scope for the variables with windows NT shell
++if "%OS%"=="Windows_NT" setlocal
++
++set DIRNAME=%~dp0
++if "%DIRNAME%"=="" set DIRNAME=.
++@rem This is normally unused
++set APP_BASE_NAME=%~n0
++set APP_HOME=%DIRNAME%
++
++@rem Resolve any "." and ".." in APP_HOME to make it shorter.
++for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
++
++@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
++set DEFAULT_JVM_OPTS=-Dfile.encoding=UTF-8 "-Xmx64m" "-Xms64m"
++
++@rem Find java.exe
++if defined JAVA_HOME goto findJavaFromJavaHome
++
++set JAVA_EXE=java.exe
++%JAVA_EXE% -version >NUL 2>&1
++if %ERRORLEVEL% equ 0 goto execute
++
++echo. 1>&2
++echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
++echo. 1>&2
++echo Please set the JAVA_HOME variable in your environment to match the 1>&2
++echo location of your Java installation. 1>&2
++
++goto fail
++
++:findJavaFromJavaHome
++set JAVA_HOME=%JAVA_HOME:"=%
++set JAVA_EXE=%JAVA_HOME%/bin/java.exe
++
++if exist "%JAVA_EXE%" goto execute
++
++echo. 1>&2
++echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
++echo. 1>&2
++echo Please set the JAVA_HOME variable in your environment to match the 1>&2
++echo location of your Java installation. 1>&2
++
++goto fail
++
++:execute
++@rem Setup the command line
++
++set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
++
++
++@rem Execute Gradle
++"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
++
++:end
++@rem End local scope for the variables with windows NT shell
++if %ERRORLEVEL% equ 0 goto mainEnd
++
++:fail
++rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
++rem the _cmd.exe /c_ return code!
++set EXIT_CODE=%ERRORLEVEL%
++if %EXIT_CODE% equ 0 set EXIT_CODE=1
++if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
++exit /b %EXIT_CODE%
++
++:mainEnd
++if "%OS%"=="Windows_NT" endlocal
++
++:omega
+diff --git a/settings.gradle.kts b/settings.gradle.kts
+new file mode 100644
+index 0000000..2941b7c
+--- /dev/null
++++ b/settings.gradle.kts
+@@ -0,0 +1,24 @@
++pluginManagement {
++    repositories {
++        google {
++            content {
++                includeGroupByRegex("com\\.android.*")
++                includeGroupByRegex("com\\.google.*")
++                includeGroupByRegex("androidx.*")
++            }
++        }
++        mavenCentral()
++        gradlePluginPortal()
++    }
++}
++
++dependencyResolutionManagement {
++    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
++    repositories {
++        google()
++        mavenCentral()
++    }
++}
++
++rootProject.name = "Samvira"
++include(":app")
