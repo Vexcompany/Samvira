@@ -44,14 +44,9 @@ import com.vexcompany.samvira.ui.theme.Teal400
 import java.text.DateFormat
 import java.util.Date
 
-/**
- * Foundation home screen: shows the SAMVIRA brand plus the status of the
- * installation identity, backend session (0.3), and organization membership
- * (0.4).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: HomeViewModel) {
+fun HomeScreen(viewModel: HomeViewModel, onOpenGallery: () -> Unit = {}) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     HomeContent(
         state = uiState,
@@ -59,6 +54,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
         onSignOut = viewModel::signOut,
         onSelectOrganization = viewModel::selectOrganization,
         onClearSelection = viewModel::clearSelection,
+        onOpenGallery = onOpenGallery,
     )
 }
 
@@ -70,52 +66,31 @@ private fun HomeContent(
     onSignOut: () -> Unit,
     onSelectOrganization: (Organization) -> Unit,
     onClearSelection: () -> Unit,
+    onOpenGallery: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("SAMVIRA", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = "Privacy-first photo & memory viewer",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = "Milestones 0.3 & 0.4 — backend contract, session, organizations",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-
+            Text("Privacy-first photo & memory viewer", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+            Text("Milestones 0.3 & 0.4 — backend contract, session, organizations", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             FoundationStatusCard()
-            IdentityCard(state = state)
-            SessionCard(
-                state = state,
-                onConnect = onConnect,
-                onSignOut = onSignOut,
-            )
-            OrganizationsCard(
-                state = state,
-                onSelectOrganization = onSelectOrganization,
-                onClearSelection = onClearSelection,
-            )
+            IdentityCard(state)
+            SessionCard(state, onConnect, onSignOut)
+            OrganizationsCard(state, onSelectOrganization, onClearSelection)
+            if (state.sessionState is SessionUi.Active && state.selection is OrganizationSelection.Selected) {
+                Button(onClick = onOpenGallery, modifier = Modifier.fillMaxWidth()) { Text("Open Gallery") }
+            }
             Text(
-                text = "View access is separate from download permission. " +
-                    "Screenshot protection cannot stop external cameras or " +
-                    "out-of-band capture.",
+                text = "View access is separate from download permission. Screenshot protection cannot stop external cameras or out-of-band capture.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -125,20 +100,9 @@ private fun HomeContent(
 
 @Composable
 private fun FoundationStatusCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Foundation status",
-                style = MaterialTheme.typography.titleLarge,
-            )
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Foundation status", style = MaterialTheme.typography.titleLarge)
             StatusRow("Compose & Material 3 shell")
             StatusRow("Navigation host")
             StatusRow("Local persistence abstraction (DataStore)")
@@ -152,74 +116,26 @@ private fun FoundationStatusCard() {
 @Composable
 private fun StatusRow(label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(Teal400, CircleShape),
-        )
+        Box(Modifier.size(10.dp).background(Teal400, CircleShape))
         Spacer(Modifier.width(12.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun IdentityCard(state: HomeUiState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Installation identity",
-                style = MaterialTheme.typography.titleLarge,
-            )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Installation identity", style = MaterialTheme.typography.titleLarge)
             when {
-                state.isLoading -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = "Provisioning…",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                }
-                state.error != null -> {
-                    Text(
-                        text = "Identity unavailable: ${state.error}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                state.isLoading -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp)); Text("Provisioning…") }
+                state.error != null -> Text("Identity unavailable: ${state.error}", color = MaterialTheme.colorScheme.error)
                 else -> {
-                    Text(
-                        text = "Ready",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Teal400,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Installation ID: ${state.installationId.orEmpty().take(8)}…",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = "Key fingerprint: SHA-256 ${state.publicKeyFingerprint.orEmpty()}",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
+                    Text("Ready", color = Teal400, fontWeight = FontWeight.SemiBold)
+                    Text("Installation ID: ${state.installationId.orEmpty().take(8)}…")
+                    Text("Key fingerprint: SHA-256 ${state.publicKeyFingerprint.orEmpty()}")
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "The private key is generated in Android Keystore and " +
-                            "never leaves the device.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text("The private key is generated in Android Keystore and never leaves the device.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -227,54 +143,23 @@ private fun IdentityCard(state: HomeUiState) {
 }
 
 @Composable
-private fun SessionCard(
-    state: HomeUiState,
-    onConnect: () -> Unit,
-    onSignOut: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Backend session",
-                style = MaterialTheme.typography.titleLarge,
-            )
+private fun SessionCard(state: HomeUiState, onConnect: () -> Unit, onSignOut: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Backend session", style = MaterialTheme.typography.titleLarge)
             when (val session = state.sessionState) {
                 SessionUi.Disconnected -> {
-                    Text(
-                        text = "Not connected",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Button(onClick = onConnect, enabled = !state.connecting) {
-                        Text(if (state.connecting) "Connecting…" else "Register & sign in")
-                    }
+                    Text("Not connected")
+                    Button(onClick = onConnect, enabled = !state.connecting) { Text(if (state.connecting) "Connecting…" else "Register & sign in") }
                 }
                 is SessionUi.Active -> {
-                    Text(
-                        text = "Active",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Teal400,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Session expires ${formatEpoch(session.expiresAtEpochMs)}",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    TextButton(onClick = onSignOut) {
-                        Text("Sign out")
-                    }
+                    Text("Active", color = Teal400, fontWeight = FontWeight.SemiBold)
+                    Text("Session expires ${formatEpoch(session.expiresAtEpochMs)}")
+                    TextButton(onClick = onSignOut) { Text("Sign out") }
                 }
                 is SessionUi.Failed -> {
-                    Text(
-                        text = "Sign-in failed: ${reasonText(session.reason)}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    Button(onClick = onConnect, enabled = !state.connecting) {
-                        Text("Retry")
-                    }
+                    Text("Sign-in failed: ${reasonText(session.reason)}", color = MaterialTheme.colorScheme.error)
+                    Button(onClick = onConnect, enabled = !state.connecting) { Text("Retry") }
                 }
             }
         }
@@ -282,79 +167,24 @@ private fun SessionCard(
 }
 
 @Composable
-private fun OrganizationsCard(
-    state: HomeUiState,
-    onSelectOrganization: (Organization) -> Unit,
-    onClearSelection: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "Organizations",
-                style = MaterialTheme.typography.titleLarge,
-            )
+private fun OrganizationsCard(state: HomeUiState, onSelectOrganization: (Organization) -> Unit, onClearSelection: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Organizations", style = MaterialTheme.typography.titleLarge)
             when {
-                state.sessionState !is SessionUi.Active -> {
-                    Text(
-                        text = "Sign in to see your organizations.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                state.organizationsLoading -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text("Loading…", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                state.organizationsError != null -> {
-                    Text(
-                        text = "Could not load organizations: ${orgErrorText(state.organizationsError)}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                state.sessionState !is SessionUi.Active -> Text("Sign in to see your organizations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                state.organizationsLoading -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp)); Text("Loading…") }
+                state.organizationsError != null -> Text("Could not load organizations: ${orgErrorText(state.organizationsError)}", color = MaterialTheme.colorScheme.error)
                 state.organizations.isEmpty() -> {
-                    Text(
-                        text = "No organizations yet.",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = "An installation may belong to at most two organizations; " +
-                            "membership is granted by the server.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text("No organizations yet.")
+                    Text("An installation may belong to at most two organizations; membership is granted by the server.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> {
                     state.organizations.forEach { organization ->
-                        OrganizationRow(
-                            organization = organization,
-                            selected = (state.selection as? OrganizationSelection.Selected)
-                                ?.organization?.id == organization.id,
-                            selecting = state.contextLoading,
-                            onSelect = { onSelectOrganization(organization) },
-                        )
+                        OrganizationRow(organization, (state.selection as? OrganizationSelection.Selected)?.organization?.id == organization.id, state.contextLoading) { onSelectOrganization(organization) }
                     }
-                    if (state.selection is OrganizationSelection.Selected) {
-                        TextButton(onClick = onClearSelection) {
-                            Text("Clear selection")
-                        }
-                    }
-                    if (state.contextError != null) {
-                        Text(
-                            text = "Could not open organization: ${orgErrorText(state.contextError)}",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    if (state.selection is OrganizationSelection.Selected) TextButton(onClick = onClearSelection) { Text("Clear selection") }
+                    if (state.contextError != null) Text("Could not open organization: ${orgErrorText(state.contextError)}", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -362,46 +192,17 @@ private fun OrganizationsCard(
 }
 
 @Composable
-private fun OrganizationRow(
-    organization: Organization,
-    selected: Boolean,
-    selecting: Boolean,
-    onSelect: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = organization.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            )
-            Text(
-                text = "State: ${membershipStateText(organization.state)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+private fun OrganizationRow(organization: Organization, selected: Boolean, selecting: Boolean, onSelect: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(organization.name, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            Text("State: ${membershipStateText(organization.state)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
         when {
-            selected -> Text(
-                text = "Selected",
-                style = MaterialTheme.typography.labelLarge,
-                color = Teal400,
-            )
-            organization.state.isActive -> TextButton(
-                onClick = onSelect,
-                enabled = !selecting,
-            ) {
-                Text("Select")
-            }
-            else -> Text(
-                text = "Unavailable",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            selected -> Text("Selected", style = MaterialTheme.typography.labelLarge, color = Teal400)
+            organization.state.isActive -> TextButton(onClick = onSelect, enabled = !selecting) { Text("Select") }
+            else -> Text("Unavailable", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -444,8 +245,7 @@ private fun reasonText(reason: AuthError): String = when (reason) {
     AuthError.UNKNOWN -> "unknown error"
 }
 
-private fun formatEpoch(epochMs: Long): String =
-    DateFormat.getDateTimeInstance().format(Date(epochMs))
+private fun formatEpoch(epochMs: Long): String = DateFormat.getDateTimeInstance().format(Date(epochMs))
 
 @Preview(showBackground = true)
 @Composable
@@ -458,17 +258,10 @@ private fun HomeContentPreview() {
                 installationId = "3f2a9c1e-0000-0000-0000-000000000000",
                 publicKeyFingerprint = "A1B2C3D4E5F60718",
                 sessionState = SessionUi.Active(expiresAtEpochMs = System.currentTimeMillis() + 86_400_000L),
-                organizations = listOf(
-                    Organization("org-1", "Demo Organization", MembershipState.ACTIVE),
-                ),
-                selection = OrganizationSelection.Selected(
-                    Organization("org-1", "Demo Organization", MembershipState.ACTIVE),
-                ),
+                organizations = listOf(Organization("org-1", "Demo Organization", MembershipState.ACTIVE)),
+                selection = OrganizationSelection.Selected(Organization("org-1", "Demo Organization", MembershipState.ACTIVE)),
             ),
-            onConnect = {},
-            onSignOut = {},
-            onSelectOrganization = {},
-            onClearSelection = {},
+            onConnect = {}, onSignOut = {}, onSelectOrganization = {}, onClearSelection = {}, onOpenGallery = {},
         )
     }
 }
