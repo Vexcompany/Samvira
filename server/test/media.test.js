@@ -98,7 +98,7 @@ test('failed upstream media stream is contained after response starts', async ()
       const body = new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('partial'));
-          controller.error(new Error('upstream boom'));
+          setTimeout(() => controller.error(new Error('upstream boom')), 10);
         },
       });
       return new Response(body, { status: 200, headers: { 'content-type': 'image/jpeg' } });
