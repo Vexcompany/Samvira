@@ -24,7 +24,33 @@ class HttpRemoteClient(
     override suspend fun listMedia(sessionToken: String, organizationId: String) = requestResult(ApiContract.media(organizationId), NetworkRequest.Method.GET, serializer = MediaListResponse.serializer(), headers = authHeaders(sessionToken) + (ApiContract.HEADER_ORGANIZATION to organizationId))
     override suspend fun requestMediaView(sessionToken: String, organizationId: String, mediaId: String) = requestResult(ApiContract.mediaView(mediaId), NetworkRequest.Method.POST, serializer = MediaViewResponse.serializer(), headers = authHeaders(sessionToken) + (ApiContract.HEADER_ORGANIZATION to organizationId))
 
+    override suspend fun fetchMediaThumbnail(sessionToken: String, organizationId: String, mediaId: String): ApiResult<ByteArray> =
+        requestBytes(ApiContract.mediaThumbnail(mediaId), authHeaders(sessionToken) + (ApiContract.HEADER_ORGANIZATION to organizationId))
+
+    override suspend fun fetchMediaContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): ApiResult<ByteArray> =
+        requestBytes(
+            ApiContract.mediaContent(mediaId),
+            authHeaders(sessionToken) +
+                (ApiContract.HEADER_ORGANIZATION to organizationId) +
+                (ApiContract.HEADER_MEDIA_VIEW_TOKEN to viewToken),
+        )
+
     private fun authHeaders(sessionToken: String) = mapOf(ApiContract.HEADER_AUTHORIZATION to ApiContract.bearer(sessionToken))
+
+    private suspend fun requestBytes(path: String, headers: Map<String, String>): ApiResult<ByteArray> {
+        if (baseUrl.isBlank()) return ApiResult.NetworkError(FailureReason.CONFIGURATION)
+        val request = NetworkRequest(
+            NetworkRequest.Method.GET,
+            baseUrl.trimEnd('/') + path,
+            buildMap {
+                putAll(headers)
+            },
+        )
+        return when (val result = networkClient.execute(request)) {
+            is NetworkResult.Success -> if (result.statusCode in 200..299) ApiResult.Success(result.body) else parseApiError(String(result.body, Charsets.UTF_8), result.statusCode)
+            is NetworkResult.Failure -> if (result.reason == FailureReason.HTTP_ERROR && result.statusCode != null && result.body != null) parseApiError(String(result.body, Charsets.UTF_8), result.statusCode) else ApiResult.NetworkError(result.reason)
+        }
+    }
 
     private suspend fun <T> requestResult(path: String, method: NetworkRequest.Method, bodyJson: String? = null, serializer: KSerializer<T>, headers: Map<String, String> = emptyMap()): ApiResult<T> {
         if (baseUrl.isBlank()) return ApiResult.NetworkError(FailureReason.CONFIGURATION)
