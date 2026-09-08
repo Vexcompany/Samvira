@@ -60,6 +60,28 @@ function requireOrganizationHeader(req, expected) {
   if (typeof header !== 'string' || header.trim() === '' || header.trim() !== expected) throw new ApiError(400, 'ORG_CONTEXT_INVALID', 'missing or mismatched X-Organization-Id header');
 }
 
+function isSafeMimeType(value, family = null) {
+  if (typeof value !== 'string') return false;
+  const pattern = family === 'image' ? /^image\/[A-Za-z0-9!#$&^_.+-]+$/ : /^(?:image|video)\/[A-Za-z0-9!#$&^_.+-]+$/;
+  return pattern.test(value);
+}
+
+async function streamResponse(req, res, upstream, mimeType, log) {
+  if (!isSafeMimeType(mimeType)) throw new ApiError(502, 'MEDIA_PROVIDER_ERROR', 'media provider returned an invalid content type');
+  res.writeHead(200, { 'content-type': mimeType, 'cache-control': 'private, no-store' });
+  const abortController = new AbortController();
+  const abortRequest = () => abortController.abort();
+  req.once('aborted', abortRequest);
+  try {
+    await pipeline(Readable.fromWeb(upstream.body), res, { signal: abortController.signal });
+  } catch (err) {
+    log(`[api] media stream failed: ${err && err.message ? err.message : err}`);
+    if (!res.destroyed) res.destroy(err);
+  } finally {
+    req.off('aborted', abortRequest);
+  }
+}
+
 export function createServer({ storage, config, provider = null, now = () => Date.now(), log = () => {} }) {
   const rateBuckets = new Map();
   function rateLimit(req, key, limit) {
@@ -111,13 +133,13 @@ export function createServer({ storage, config, provider = null, now = () => Dat
       return sendJson(res, 200, { organization_id: org.organization_id, name: org.name, state: membership.state });
     }
 
-    const mediaMatch = path.match(/^\/api\/v1\/media\/([^/]+)\/(view|content)$/);
+    const mediaMatch = path.match(/^\/api\/v1\/media\/([^/]+)\/(view|content|thumbnail)$/);
     if (method === 'GET' && path === '/api/v1/media') {
       const session = authorizeSession(storage, req, now()); const organizationId = url.searchParams.get('organization_id');
       if (!organizationId) throw ApiError.malformed('organization_id is required'); requireOrganizationHeader(req, organizationId); requireActiveMembership(storage, session.installation_id, organizationId);
       if (!provider) throw new ApiError(503, 'MEDIA_PROVIDER_UNAVAILABLE', 'Pagaska Drive provider is not configured');
       const items = await provider.listMedia(organizationId);
-      return sendJson(res, 200, { media: items.map(({ source_url, thumbnail_url, ...item }) => ({ ...item, organization_id: organizationId, thumbnail_url: null })) });
+      return sendJson(res, 200, { media: items.map(({ source_url, thumbnail_url, ...item }) => ({ ...item, organization_id: organizationId, thumbnail_url: thumbnail_url ? `/api/v1/media/${encodeURIComponent(item.media_id)}/thumbnail` : null })) });
     }
     if (method === 'POST' && mediaMatch?.[2] === 'view') {
       const session = authorizeSession(storage, req, now()); const mediaId = decodePathPart(mediaMatch[1]); const organizationId = req.headers['x-organization-id'];
@@ -130,6 +152,17 @@ export function createServer({ storage, config, provider = null, now = () => Dat
       storage.createMediaView({ viewTokenHash: hashToken(accessToken), installationId: session.installation_id, organizationId, mediaId, sourceUrl: item.source_url, mimeType: item.mime_type, expiresAt, createdAt });
       return sendJson(res, 200, { media_id: item.media_id, type: item.type, mime_type: item.mime_type, expires_at_epoch_ms: expiresAt, content_url: `/api/v1/media/${encodeURIComponent(item.media_id)}/content`, access_token: accessToken });
     }
+    if (method === 'GET' && mediaMatch?.[2] === 'thumbnail') {
+      const session = authorizeSession(storage, req, now()); const mediaId = decodePathPart(mediaMatch[1]); const organizationId = req.headers['x-organization-id'];
+      if (typeof organizationId !== 'string' || !organizationId) throw new ApiError(400, 'ORG_CONTEXT_INVALID', 'missing X-Organization-Id header'); requireActiveMembership(storage, session.installation_id, organizationId);
+      if (!provider) throw new ApiError(503, 'MEDIA_PROVIDER_UNAVAILABLE', 'Pagaska Drive provider is not configured');
+      const items = await provider.listMedia(organizationId); const item = items.find((candidate) => candidate.media_id === mediaId);
+      if (!item || !item.thumbnail_url) throw ApiError.notFound('THUMBNAIL_UNAVAILABLE', 'thumbnail does not exist or is not available');
+      const upstream = await provider.openMedia(item.thumbnail_url);
+      const upstreamMime = upstream.headers.get('content-type')?.split(';', 1)[0]?.trim();
+      await streamResponse(req, res, upstream, upstreamMime, log);
+      return;
+    }
     if (method === 'GET' && mediaMatch?.[2] === 'content') {
       const session = authorizeSession(storage, req, now()); const mediaId = decodePathPart(mediaMatch[1]); const organizationId = req.headers['x-organization-id']; const viewToken = req.headers['x-media-view-token'];
       if (typeof organizationId !== 'string' || !organizationId || typeof viewToken !== 'string' || !viewToken) throw new ApiError(400, 'MEDIA_VIEW_INVALID', 'missing media view credentials');
@@ -137,18 +170,7 @@ export function createServer({ storage, config, provider = null, now = () => Dat
       if (!view || view.installation_id !== session.installation_id || view.organization_id !== organizationId || view.media_id !== mediaId) throw ApiError.unauthorized('MEDIA_VIEW_INVALID', 'media view grant is invalid or expired');
       if (!provider) throw new ApiError(503, 'MEDIA_PROVIDER_UNAVAILABLE', 'Pagaska Drive provider is not configured');
       const upstream = await provider.openMedia(view.source_url);
-      res.writeHead(200, { 'content-type': view.mime_type, 'cache-control': 'private, no-store' });
-      const abortController = new AbortController();
-      const abortRequest = () => abortController.abort();
-      req.once('aborted', abortRequest);
-      try {
-        await pipeline(Readable.fromWeb(upstream.body), res, { signal: abortController.signal });
-      } catch (err) {
-        log(`[api] media stream failed: ${err && err.message ? err.message : err}`);
-        if (!res.destroyed) res.destroy(err);
-      } finally {
-        req.off('aborted', abortRequest);
-      }
+      await streamResponse(req, res, upstream, view.mime_type, log);
       return;
     }
     throw ApiError.notFound('UNKNOWN_ROUTE', 'route not found');
