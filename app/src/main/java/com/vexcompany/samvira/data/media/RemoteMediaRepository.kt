@@ -9,7 +9,10 @@ import com.vexcompany.samvira.domain.media.MediaResult
 import com.vexcompany.samvira.domain.media.MediaType
 import com.vexcompany.samvira.domain.media.MediaViewGrant
 
-class RemoteMediaRepository(private val remoteClient: RemoteClient) : MediaRepository {
+class RemoteMediaRepository(
+    private val remoteClient: RemoteClient,
+    private val thumbnailCache: ThumbnailCache,
+) : MediaRepository {
     override suspend fun listMedia(sessionToken: String, organizationId: String): MediaResult<List<MediaItem>> = when (val result = remoteClient.listMedia(sessionToken, organizationId)) {
         is ApiResult.Success -> MediaResult.Success(result.value.media.map(::toDomain))
         is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
@@ -22,12 +25,17 @@ class RemoteMediaRepository(private val remoteClient: RemoteClient) : MediaRepos
         is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
     }
 
-    override suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray> =
-        when (val result = remoteClient.fetchMediaThumbnail(sessionToken, organizationId, mediaId)) {
-            is ApiResult.Success -> MediaResult.Success(result.value)
+    override suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray> {
+        thumbnailCache.read(mediaId)?.let { return MediaResult.Success(it) }
+        return when (val result = remoteClient.fetchMediaThumbnail(sessionToken, organizationId, mediaId)) {
+            is ApiResult.Success -> {
+                thumbnailCache.write(mediaId, result.value)
+                MediaResult.Success(result.value)
+            }
             is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
             is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
         }
+    }
 
     override suspend fun fetchContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): MediaResult<ByteArray> =
         when (val result = remoteClient.fetchMediaContent(sessionToken, organizationId, mediaId, viewToken)) {
