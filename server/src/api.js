@@ -1,5 +1,6 @@
 /** HTTP layer for the SAMVIRA backend. Provider URLs never leave this boundary. */
 import http from 'node:http';
+import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { createPublicKey } from 'node:crypto';
 import { ApiError } from './errors.js';
@@ -125,8 +126,8 @@ export function createServer({ storage, config, provider = null, now = () => Dat
       const items = await provider.listMedia(organizationId); const item = items.find((candidate) => candidate.media_id === mediaId);
       if (!item) throw ApiError.notFound('UNKNOWN_MEDIA', 'media does not exist or is not available to this organization');
       if (typeof item.source_url !== 'string' || !item.source_url) throw new ApiError(502, 'MEDIA_PROVIDER_ERROR', 'media provider returned no source');
-      const accessToken = newSessionToken(); const expiresAt = Math.min(now() + config.mediaViewTtlMs, now() + config.sessionTtlMs);
-      storage.createMediaView({ viewTokenHash: hashToken(accessToken), installationId: session.installation_id, organizationId, mediaId, sourceUrl: item.source_url, mimeType: item.mime_type, expiresAt, createdAt: now() });
+      const accessToken = newSessionToken(); const createdAt = now(); const expiresAt = Math.min(createdAt + config.mediaViewTtlMs, session.expires_at);
+      storage.createMediaView({ viewTokenHash: hashToken(accessToken), installationId: session.installation_id, organizationId, mediaId, sourceUrl: item.source_url, mimeType: item.mime_type, expiresAt, createdAt });
       return sendJson(res, 200, { media_id: item.media_id, type: item.type, mime_type: item.mime_type, expires_at_epoch_ms: expiresAt, content_url: `/api/v1/media/${encodeURIComponent(item.media_id)}/content`, access_token: accessToken });
     }
     if (method === 'GET' && mediaMatch?.[2] === 'content') {
@@ -135,8 +136,20 @@ export function createServer({ storage, config, provider = null, now = () => Dat
       requireActiveMembership(storage, session.installation_id, organizationId); const view = storage.getMediaView(hashToken(viewToken), now());
       if (!view || view.installation_id !== session.installation_id || view.organization_id !== organizationId || view.media_id !== mediaId) throw ApiError.unauthorized('MEDIA_VIEW_INVALID', 'media view grant is invalid or expired');
       if (!provider) throw new ApiError(503, 'MEDIA_PROVIDER_UNAVAILABLE', 'Pagaska Drive provider is not configured');
-      const upstream = await provider.openMedia(view.source_url); const headers = { 'content-type': view.mime_type, 'cache-control': 'private, no-store' }; if (upstream.headers.get('content-length')) headers['content-length'] = upstream.headers.get('content-length');
-      res.writeHead(200, headers); await Readable.fromWeb(upstream.body).pipe(res); return;
+      const upstream = await provider.openMedia(view.source_url);
+      res.writeHead(200, { 'content-type': view.mime_type, 'cache-control': 'private, no-store' });
+      const abortController = new AbortController();
+      const abortRequest = () => abortController.abort();
+      req.once('aborted', abortRequest);
+      try {
+        await pipeline(Readable.fromWeb(upstream.body), res, { signal: abortController.signal });
+      } catch (err) {
+        log(`[api] media stream failed: ${err && err.message ? err.message : err}`);
+        if (!res.destroyed) res.destroy(err);
+      } finally {
+        req.off('aborted', abortRequest);
+      }
+      return;
     }
     throw ApiError.notFound('UNKNOWN_ROUTE', 'route not found');
   }
@@ -145,4 +158,4 @@ export function createServer({ storage, config, provider = null, now = () => Dat
 
 function decodePathPart(value) { try { return decodeURIComponent(value); } catch { throw ApiError.malformed('media id is not valid URL encoding'); } }
 function safePath(rawUrl) { try { return new URL(rawUrl, 'http://localhost').pathname; } catch { return '/'; } }
-function handleError(res, err, log) { if (err instanceof ApiError) { sendJson(res, err.status, err.toBody()); return; } log(`[api] internal error: ${err && err.message ? err.message : err}`); sendJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'internal server error' } }); }
+function handleError(res, err, log) { if (res.headersSent || res.destroyed) { if (!res.destroyed) res.destroy(err); return; } if (err instanceof ApiError) { sendJson(res, err.status, err.toBody()); return; } log(`[api] internal error: ${err && err.message ? err.message : err}`); sendJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'internal server error' } }); }
