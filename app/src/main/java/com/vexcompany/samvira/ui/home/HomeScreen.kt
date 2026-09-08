@@ -101,21 +101,17 @@ private fun HomeContent(
             )
 
             FoundationStatusCard()
-
             IdentityCard(state = state)
-
             SessionCard(
                 state = state,
                 onConnect = onConnect,
                 onSignOut = onSignOut,
             )
-
             OrganizationsCard(
                 state = state,
                 onSelectOrganization = onSelectOrganization,
                 onClearSelection = onClearSelection,
             )
-
             Text(
                 text = "View access is separate from download permission. " +
                     "Screenshot protection cannot stop external cameras or " +
@@ -195,7 +191,6 @@ private fun IdentityCard(state: HomeUiState) {
                         )
                     }
                 }
-
                 state.error != null -> {
                     Text(
                         text = "Identity unavailable: ${state.error}",
@@ -203,7 +198,6 @@ private fun IdentityCard(state: HomeUiState) {
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-
                 else -> {
                     Text(
                         text = "Ready",
@@ -257,7 +251,6 @@ private fun SessionCard(
                         Text(if (state.connecting) "Connecting…" else "Register & sign in")
                     }
                 }
-
                 is SessionUi.Active -> {
                     Text(
                         text = "Active",
@@ -273,7 +266,6 @@ private fun SessionCard(
                         Text("Sign out")
                     }
                 }
-
                 is SessionUi.Failed -> {
                     Text(
                         text = "Sign-in failed: ${reasonText(session.reason)}",
@@ -312,7 +304,6 @@ private fun OrganizationsCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-
                 state.organizationsLoading -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
@@ -323,7 +314,6 @@ private fun OrganizationsCard(
                         Text("Loading…", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
-
                 state.organizationsError != null -> {
                     Text(
                         text = "Could not load organizations: ${orgErrorText(state.organizationsError)}",
@@ -331,7 +321,6 @@ private fun OrganizationsCard(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-
                 state.organizations.isEmpty() -> {
                     Text(
                         text = "No organizations yet.",
@@ -344,7 +333,6 @@ private fun OrganizationsCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-
                 else -> {
                     state.organizations.forEach { organization ->
                         OrganizationRow(
@@ -403,14 +391,12 @@ private fun OrganizationRow(
                 style = MaterialTheme.typography.labelLarge,
                 color = Teal400,
             )
-
             organization.state.isActive -> TextButton(
                 onClick = onSelect,
                 enabled = !selecting,
             ) {
                 Text("Select")
             }
-
             else -> Text(
                 text = "Unavailable",
                 style = MaterialTheme.typography.labelLarge,
@@ -453,6 +439,7 @@ private fun reasonText(reason: AuthError): String = when (reason) {
     AuthError.MALFORMED_REQUEST -> "request rejected by server"
     AuthError.MALFORMED_RESPONSE -> "unexpected server response"
     AuthError.SESSION_REJECTED -> "session rejected by server"
+    AuthError.STORAGE -> "local session storage failed"
     AuthError.NETWORK -> "backend unreachable"
     AuthError.UNKNOWN -> "unknown error"
 }
