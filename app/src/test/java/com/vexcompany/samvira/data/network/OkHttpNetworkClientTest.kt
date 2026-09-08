@@ -46,7 +46,7 @@ class OkHttpNetworkClientTest {
         val success = result as NetworkResult.Success
         assertEquals(200, success.statusCode)
         assertEquals("ok", String(success.body))
-        assertEquals("text/plain", success.headers["Content-Type"])
+        assertEquals("text/plain", success.headers["content-type"])
     }
 
     @Test

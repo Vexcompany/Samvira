@@ -5,6 +5,7 @@ import com.vexcompany.samvira.core.logging.Scrubber
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,7 +34,10 @@ class OkHttpNetworkClient(
                     val body = response.body?.bytes() ?: ByteArray(0)
                     val headers = response.headers
                         .toMultimap()
-                        .mapValues { (_, values) -> values.joinToString(", ") }
+                        .entries
+                        .associate { (name, values) ->
+                            name.lowercase(Locale.ROOT) to values.joinToString(", ")
+                        }
 
                     if (!response.isSuccessful) {
                         return@withContext NetworkResult.Failure(

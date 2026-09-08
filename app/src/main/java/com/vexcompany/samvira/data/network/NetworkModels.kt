@@ -19,6 +19,7 @@ sealed interface NetworkResult {
     data class Success(
         val statusCode: Int,
         val body: ByteArray,
+        /** HTTP response header names are normalized to lowercase. */
         val headers: Map<String, String>,
     ) : NetworkResult
 
