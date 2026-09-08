@@ -1,0 +1,90 @@
+name: Apply Arena patch snapshot
+
+on:
+  push:
+    branches:
+      - "apply/**"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply patch snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          git show "origin/main:01a0813a-6704-722d-96ec-95197ac40eb6 (1).patch" > /tmp/arena.patch
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          patch = Path('/tmp/arena.patch').read_text(encoding='utf-8').splitlines(keepends=True)
+          current_path = None
+          collecting = False
+          binary = False
+          content = []
+          changes = []
+
+          def flush():
+              global current_path, collecting, binary, content
+              if current_path and collecting and not binary:
+                  target = Path(current_path)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_text(''.join(content), encoding='utf-8')
+                  changes.append(current_path)
+              current_path = None
+              collecting = False
+              binary = False
+              content = []
+
+          for line in patch:
+              if line.startswith('diff --git a/'):
+                  flush()
+                  parts = line.rstrip('\n').split(' ')
+                  current_path = parts[3][2:] if len(parts) >= 4 and parts[3].startswith('b/') else None
+                  continue
+              if current_path is None:
+                  continue
+              if line.startswith('Binary files '):
+                  binary = True
+                  collecting = False
+                  continue
+              if line.startswith('+++ '):
+                  collecting = True
+                  continue
+              if line.startswith('@@ '):
+                  continue
+              if collecting and line.startswith('+'):
+                  content.append(line[1:])
+
+          flush()
+          print(f'Applied text files: {len(changes)}')
+          for path in changes:
+              print(path)
+          PY
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-arena-patch.yml
+          git status --short
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes produced by Arena patch."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "apply: Arena milestone 0.3 and 0.4 patch"
+          git push origin HEAD
