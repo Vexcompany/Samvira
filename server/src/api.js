@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { createPublicKey } from 'node:crypto';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { ApiError } from './errors.js';
 import { fromB64url, hashToken, newChallengeId, newNonce, newSessionToken, toB64url, verifySignature } from './security.js';
 
@@ -32,8 +32,13 @@ function requireString(body, field) {
 }
 
 function validatePublicKey(pem) {
-  try { const key = createPublicKey(pem); if (key.type !== 'public') throw new Error('private key supplied'); return key.export({ type: 'spki', format: 'pem' }); }
-  catch { throw ApiError.malformed('public_key_pem must be a valid public key'); }
+  try {
+    const publicKey = createPublicKey(pem);
+    try { createPrivateKey(pem); throw new Error('private key supplied'); } catch (err) {
+      if (err?.message === 'private key supplied') throw err;
+    }
+    return publicKey.export({ type: 'spki', format: 'pem' });
+  } catch { throw ApiError.malformed('public_key_pem must be a valid public key'); }
 }
 
 function authorizeSession(storage, req, nowMs) {
