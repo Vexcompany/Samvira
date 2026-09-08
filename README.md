@@ -126,7 +126,8 @@ minimal workflow.
 
 ## Contributing / decisions log
 
-- Package/application id is `com.vexcompany.samvira` (`com.vexcompany.samvira`).
+- Package/application id is `com.vexcompany.samvira` (reverse-DNS of the owning
+  GitHub organization).
 - The brand palette is a placeholder and can be replaced without touching
   screen code (screens reference semantic theme colors only).
 - Manual DI was chosen over Hilt/Koin to keep the foundation small and
