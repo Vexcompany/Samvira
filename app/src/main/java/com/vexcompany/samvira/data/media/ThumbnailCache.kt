@@ -8,17 +8,16 @@ import java.security.MessageDigest
 class ThumbnailCache(context: Context) {
     private val directory = File(context.cacheDir, "samvira-thumbnails").apply { mkdirs() }
 
-    fun read(mediaId: String): ByteArray? {
-        val file = fileFor(mediaId)
+    fun read(organizationId: String, mediaId: String): ByteArray? {
+        val file = fileFor(organizationId, mediaId)
         return if (file.isFile && file.length() <= MAX_ENTRY_BYTES) runCatching { file.readBytes() }.getOrNull() else null
     }
 
-    fun write(mediaId: String, bytes: ByteArray) {
+    fun write(organizationId: String, mediaId: String, bytes: ByteArray) {
         if (bytes.isEmpty() || bytes.size > MAX_ENTRY_BYTES) return
         runCatching {
             trimIfNeeded(bytes.size.toLong())
-            val file = fileFor(mediaId)
-            file.writeBytes(bytes)
+            fileFor(organizationId, mediaId).writeBytes(bytes)
         }
     }
 
@@ -33,7 +32,7 @@ class ThumbnailCache(context: Context) {
         }
     }
 
-    private fun fileFor(mediaId: String): File = File(directory, sha256(mediaId))
+    private fun fileFor(organizationId: String, mediaId: String): File = File(directory, sha256("$organizationId\u0000$mediaId"))
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
