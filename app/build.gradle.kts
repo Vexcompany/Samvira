@@ -37,21 +37,33 @@ android {
                 "proguard-rules.pro",
             )
 
-            // Production releases must be built with an explicit HTTPS backend.
-            // Accepted sources: -PsamviraApiBaseUrl=... or SAMVIRA_API_BASE_URL.
+            // Only require the production endpoint when a release task is
+            // actually requested. Gradle configures all build types even for
+            // debug-only tasks, so validating unconditionally would make
+            // assembleDebug fail before the debug variant is built.
+            val releaseTaskRequested = gradle.startParameter.taskNames.any {
+                it.contains("release", ignoreCase = true)
+            }
             val configuredApiBaseUrl = providers.gradleProperty("samviraApiBaseUrl")
                 .orElse(providers.environmentVariable("SAMVIRA_API_BASE_URL"))
                 .orElse("")
                 .get()
                 .trim()
-            require(configuredApiBaseUrl.isNotEmpty()) {
-                "Release builds require -PsamviraApiBaseUrl=https://... or SAMVIRA_API_BASE_URL"
+
+            if (releaseTaskRequested) {
+                require(configuredApiBaseUrl.isNotEmpty()) {
+                    "Release builds require -PsamviraApiBaseUrl=https://... or SAMVIRA_API_BASE_URL"
+                }
+                val parsedApiBaseUrl = runCatching { URI(configuredApiBaseUrl) }.getOrNull()
+                require(parsedApiBaseUrl?.scheme == "https" && parsedApiBaseUrl.host != null) {
+                    "Release API base URL must be an absolute HTTPS URL"
+                }
             }
-            val parsedApiBaseUrl = runCatching { URI(configuredApiBaseUrl) }.getOrNull()
-            require(parsedApiBaseUrl?.scheme == "https" && parsedApiBaseUrl.host != null) {
-                "Release API base URL must be an absolute HTTPS URL"
-            }
-            val escapedApiBaseUrl = configuredApiBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")
+
+            val releaseApiBaseUrl = configuredApiBaseUrl.ifEmpty { "https://invalid.invalid/" }
+            val escapedApiBaseUrl = releaseApiBaseUrl
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
             buildConfigField("String", "API_BASE_URL", "\"$escapedApiBaseUrl\"")
         }
     }
