@@ -19,9 +19,16 @@ object ApiContract {
     fun mediaView(mediaId: String): String =
         "$MEDIA/${encodePathSegment(mediaId)}/view"
 
+    fun mediaThumbnail(mediaId: String): String =
+        "$MEDIA/${encodePathSegment(mediaId)}/thumbnail"
+
+    fun mediaContent(mediaId: String): String =
+        "$MEDIA/${encodePathSegment(mediaId)}/content"
+
     const val HEADER_AUTHORIZATION = "Authorization"
     const val HEADER_CONTENT_TYPE = "Content-Type"
     const val HEADER_ORGANIZATION = "X-Organization-Id"
+    const val HEADER_MEDIA_VIEW_TOKEN = "X-Media-View-Token"
     const val MEDIA_TYPE_JSON = "application/json"
     fun bearer(token: String): String = "Bearer $token"
 
