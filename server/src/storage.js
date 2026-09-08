@@ -38,9 +38,14 @@ export function createStorage(dbPath = ':memory:', { maxOrgsPerInstallation = 2,
       return { installation_id: installationId, registered_at: nowMs, already_registered: false };
     },
     getInstallation(id) { return db.prepare('SELECT installation_id, public_key_pem, registered_at FROM installations WHERE installation_id = ?').get(id); },
-    createChallenge({ challengeId, installationId, nonceB64, nonce, expiresAt, nowMs = Date.now() }) { cleanupExpired(nowMs); db.prepare('INSERT INTO challenges VALUES (?, ?, ?, ?, ?, NULL)').run(challengeId, installationId, nonceB64, nonce, expiresAt); },
+    createChallenge({ challengeId, installationId, nonceB64, nonce, expiresAt, nowMs = Date.now() }) {
+      cleanupExpired(nowMs);
+      db.prepare('INSERT INTO challenges VALUES (?, ?, ?, ?, ?, NULL)').run(challengeId, installationId, nonceB64, nonce, expiresAt);
+    },
     getChallenge(id) { return db.prepare('SELECT * FROM challenges WHERE challenge_id = ?').get(id); },
     consumeChallengeAndCreateSession({ challengeId, nowMs, tokenHash, installationId, createdAt, expiresAt }) {
+      if (typeof tokenHash !== 'string' || tokenHash.length === 0) throw new Error('tokenHash must be a non-empty string');
+      if (typeof installationId !== 'string' || installationId.length === 0) throw new Error('installationId must be a non-empty string');
       db.exec('BEGIN IMMEDIATE');
       try {
         const result = db.prepare('UPDATE challenges SET used_at = ? WHERE challenge_id = ? AND used_at IS NULL AND expires_at > ?').run(nowMs, challengeId, nowMs);
