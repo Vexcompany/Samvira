@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield: SAMVIRA is a privacy-first viewer. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,24 L78,33 L78,52 C78,68 67,81 54,86 C41,81 30,68 30,52 L30,33 Z" />
+    <!-- Aperture/memory mark. -->
+    <path
+        android:fillColor="#1B2A4A"
+        android:pathData="M54,46 a9,9 0 1,1 0,18 a9,9 0 1,1 0,-18" />
+</vector>
