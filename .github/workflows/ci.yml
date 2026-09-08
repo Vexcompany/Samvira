@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & test
+    name: Android build & test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,12 +35,29 @@ jobs:
       - name: Compile instrumented test sources
         run: ./gradlew --no-daemon assembleDebugAndroidTest
 
-      - name: Upload test reports
+      - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: android-test-reports
           path: |
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+
+  server-test:
+    name: Server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+
+      - name: Run server tests
+        working-directory: server
+        run: npm test
