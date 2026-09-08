@@ -3,7 +3,7 @@ import { ApiError } from './errors.js';
 /**
  * Provider-neutral Pagaska Drive adapter. Provider URLs remain server-side.
  * Expected metadata response: { media: [{ media_id, type, mime_type, width,
- * height, duration_ms, created_at_epoch_ms, source_url }] }.
+ * height, duration_ms, created_at_epoch_ms, source_url, thumbnail_url }] }.
  */
 export class PagaskaDriveProvider {
   constructor({ baseUrl, fetchImpl = fetch }) {
@@ -64,9 +64,21 @@ function normalizeMedia(item) {
     height: item.height == null ? null : Number.isSafeInteger(item.height) ? item.height : null,
     duration_ms: item.duration_ms == null ? null : Number.isSafeInteger(item.duration_ms) ? item.duration_ms : null,
     created_at_epoch_ms: item.created_at_epoch_ms,
-    thumbnail_url: null,
+    thumbnail_url: normalizeOptionalUrl(item.thumbnail_url),
     source_url: item.source_url,
   };
+}
+
+function normalizeOptionalUrl(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') throw new ApiError(502, 'MEDIA_PROVIDER_ERROR', 'invalid thumbnail URL');
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') throw new Error('thumbnail must use HTTPS');
+    return url.href;
+  } catch {
+    throw new ApiError(502, 'MEDIA_PROVIDER_ERROR', 'invalid thumbnail URL');
+  }
 }
 
 function isSupportedMimeType(value) {
