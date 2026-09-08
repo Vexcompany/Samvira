@@ -22,6 +22,20 @@ class RemoteMediaRepository(private val remoteClient: RemoteClient) : MediaRepos
         is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
     }
 
+    override suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray> =
+        when (val result = remoteClient.fetchMediaThumbnail(sessionToken, organizationId, mediaId)) {
+            is ApiResult.Success -> MediaResult.Success(result.value)
+            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+            is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
+        }
+
+    override suspend fun fetchContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): MediaResult<ByteArray> =
+        when (val result = remoteClient.fetchMediaContent(sessionToken, organizationId, mediaId, viewToken)) {
+            is ApiResult.Success -> MediaResult.Success(result.value)
+            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+            is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
+        }
+
     private fun toDomain(dto: com.vexcompany.samvira.data.remote.MediaItemDto) = MediaItem(dto.media_id, dto.organization_id, toDomainType(dto.type), dto.mime_type, dto.width, dto.height, dto.duration_ms, dto.created_at_epoch_ms, dto.thumbnail_url)
     private fun toDomainType(type: MediaTypeDto) = when (type) { MediaTypeDto.PHOTO -> MediaType.PHOTO; MediaTypeDto.VIDEO -> MediaType.VIDEO }
 }
