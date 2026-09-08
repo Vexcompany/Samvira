@@ -22,14 +22,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Session status shown on the home screen. */
 sealed interface SessionUi {
     data object Disconnected : SessionUi
     data class Active(val expiresAtEpochMs: Long) : SessionUi
     data class Failed(val reason: AuthError) : SessionUi
 }
 
-/** UI state for the foundation home screen. */
 data class HomeUiState(
     val isLoading: Boolean = true,
     val identityProvisioned: Boolean = false,
@@ -52,9 +50,9 @@ class HomeViewModel(
     private val organizationRepository: OrganizationRepository,
     private val organizationSelection: OrganizationSelectionStore,
 ) : ViewModel() {
-
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private var sessionGeneration = 0L
 
     init {
         viewModelScope.launch { loadIdentity() }
@@ -63,67 +61,47 @@ class HomeViewModel(
 
     fun connect() {
         viewModelScope.launch {
+            val generation = ++sessionGeneration
             _uiState.update { it.copy(connecting = true, sessionState = SessionUi.Disconnected) }
             when (val result = authRepository.establishSession()) {
                 is AuthResult.Success -> {
-                    _uiState.update {
-                        it.copy(
-                            connecting = false,
-                            sessionState = SessionUi.Active(result.session.expiresAtEpochMs),
-                        )
-                    }
-                    loadOrganizations()
+                    if (generation != sessionGeneration) return@launch
+                    _uiState.update { it.copy(connecting = false, sessionState = SessionUi.Active(result.session.expiresAtEpochMs)) }
+                    loadOrganizations(generation)
                 }
-
-                is AuthResult.Failure -> _uiState.update {
-                    it.copy(
-                        connecting = false,
-                        sessionState = SessionUi.Failed(result.error),
-                    )
+                is AuthResult.Failure -> if (generation == sessionGeneration) {
+                    _uiState.update { it.copy(connecting = false, sessionState = SessionUi.Failed(result.error)) }
                 }
             }
         }
     }
 
     fun signOut() {
+        sessionGeneration++
         viewModelScope.launch {
             authRepository.signOut()
             organizationSelection.clear()
-            _uiState.update {
-                it.copy(
-                    sessionState = SessionUi.Disconnected,
-                    organizations = emptyList(),
-                    selection = OrganizationSelection.None,
-                    organizationsError = null,
-                    contextError = null,
-                )
-            }
+            _uiState.update { it.copy(sessionState = SessionUi.Disconnected, organizations = emptyList(), selection = OrganizationSelection.None, organizationsError = null, contextError = null, connecting = false, contextLoading = false) }
         }
     }
 
-    /** Selects an organization only after the server validates its context. */
     fun selectOrganization(organization: Organization) {
+        val generation = sessionGeneration
         viewModelScope.launch {
             _uiState.update { it.copy(contextLoading = true, contextError = null) }
             when (val result = organizationRepository.organizationContext(organization.id)) {
-                is OrganizationContextResult.Success -> {
+                is OrganizationContextResult.Success -> if (generation == sessionGeneration) {
                     organizationSelection.select(result.organization)
-                    _uiState.update {
-                        it.copy(
-                            contextLoading = false,
-                            selection = OrganizationSelection.Selected(result.organization),
-                        )
-                    }
+                    _uiState.update { it.copy(contextLoading = false, selection = OrganizationSelection.Selected(result.organization)) }
                 }
-
-                is OrganizationContextResult.Failure -> {
+                is OrganizationContextResult.Failure -> if (generation == sessionGeneration) {
                     organizationSelection.clear()
-                    _uiState.update {
-                        it.copy(
-                            contextLoading = false,
-                            contextError = result.error,
-                            selection = OrganizationSelection.None,
-                        )
+                    if (result.error == OrganizationError.SESSION_REJECTED) {
+                        authRepository.signOut()
+                        sessionGeneration++
+                        _uiState.update { it.copy(contextLoading = false, contextError = null, selection = OrganizationSelection.None, sessionState = SessionUi.Disconnected, organizations = emptyList()) }
+                    } else {
+                        _uiState.update { it.copy(contextLoading = false, contextError = result.error, selection = OrganizationSelection.None) }
                     }
                 }
             }
@@ -132,40 +110,36 @@ class HomeViewModel(
 
     fun clearSelection() {
         organizationSelection.clear()
-        _uiState.update {
-            it.copy(selection = OrganizationSelection.None, contextError = null)
-        }
+        _uiState.update { it.copy(selection = OrganizationSelection.None, contextError = null) }
     }
 
     private suspend fun refreshSession() {
         when (val state = authRepository.currentSession()) {
             is SessionState.Active -> {
-                _uiState.update {
-                    it.copy(sessionState = SessionUi.Active(state.session.expiresAtEpochMs))
-                }
-                loadOrganizations()
+                val generation = sessionGeneration
+                _uiState.update { it.copy(sessionState = SessionUi.Active(state.session.expiresAtEpochMs)) }
+                loadOrganizations(generation)
             }
-
             SessionState.None -> Unit
         }
     }
 
-    private suspend fun loadOrganizations() {
+    private suspend fun loadOrganizations(generation: Long = sessionGeneration) {
+        if (generation != sessionGeneration) return
         _uiState.update { it.copy(organizationsLoading = true, organizationsError = null) }
         when (val result = organizationRepository.listOrganizations()) {
-            is OrganizationsResult.Success -> _uiState.update {
-                it.copy(
-                    organizationsLoading = false,
-                    organizations = result.organizations,
-                )
+            is OrganizationsResult.Success -> if (generation == sessionGeneration) {
+                _uiState.update { it.copy(organizationsLoading = false, organizations = result.organizations) }
             }
-
-            is OrganizationsResult.Failure -> _uiState.update {
-                it.copy(
-                    organizationsLoading = false,
-                    organizationsError = result.error,
-                    organizations = emptyList(),
-                )
+            is OrganizationsResult.Failure -> if (generation == sessionGeneration) {
+                if (result.error == OrganizationError.SESSION_REJECTED) {
+                    authRepository.signOut()
+                    organizationSelection.clear()
+                    sessionGeneration++
+                    _uiState.update { it.copy(organizationsLoading = false, organizationsError = null, organizations = emptyList(), selection = OrganizationSelection.None, sessionState = SessionUi.Disconnected) }
+                } else {
+                    _uiState.update { it.copy(organizationsLoading = false, organizationsError = result.error, organizations = emptyList()) }
+                }
             }
         }
     }
@@ -173,33 +147,10 @@ class HomeViewModel(
     private suspend fun loadIdentity() {
         try {
             val identity = identityRepository.currentIdentity()
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    identityProvisioned = true,
-                    installationId = identity.installationId,
-                    publicKeyFingerprint = fingerprint(identity.publicKeyPem),
-                )
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Throwable) {
-            // Do not surface raw Keystore, filesystem, or platform exception
-            // text: it may contain implementation details or sensitive
-            // request/path material.
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    error = "Identity unavailable. Please restart SAMVIRA.",
-                )
-            }
-        }
+            _uiState.update { it.copy(isLoading = false, identityProvisioned = true, installationId = identity.installationId, publicKeyFingerprint = fingerprint(identity.publicKeyPem)) }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Throwable) { _uiState.update { it.copy(isLoading = false, error = "Identity unavailable. Please restart SAMVIRA.") } }
     }
 
-    private fun fingerprint(pem: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(pem.toByteArray())
-        return digest.take(8).joinToString("") { byte ->
-            "%02X".format(byte.toInt() and 0xFF)
-        }
-    }
+    private fun fingerprint(pem: String): String = MessageDigest.getInstance("SHA-256").digest(pem.toByteArray()).take(8).joinToString("") { "%02X".format(it.toInt() and 0xFF) }
 }

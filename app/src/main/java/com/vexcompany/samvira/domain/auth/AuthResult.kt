@@ -1,6 +1,5 @@
 package com.vexcompany.samvira.domain.auth
 
-/** Coarse-grained authentication failure taxonomy. */
 enum class AuthError {
     KEYSTORE,
     INSTALLATION_CONFLICT,
@@ -14,6 +13,7 @@ enum class AuthError {
     MALFORMED_REQUEST,
     MALFORMED_RESPONSE,
     SESSION_REJECTED,
+    STORAGE,
     NETWORK,
     UNKNOWN,
 }

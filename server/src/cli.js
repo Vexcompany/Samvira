@@ -7,7 +7,10 @@ import { createServer } from './api.js';
 import { createStorage } from './storage.js';
 
 const config = loadConfig();
-const storage = createStorage(config.dbPath);
+const storage = createStorage(config.dbPath, {
+  maxOrgsPerInstallation: config.maxOrgsPerInstallation,
+  maxInstallations: config.maxInstallations,
+});
 
 if (config.seedDemoOrgs) {
   const now = Date.now();
