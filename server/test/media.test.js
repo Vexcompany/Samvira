@@ -1,0 +1,60 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { get, post, registerAndVerify, startServer, generateKeyPair } from './helpers.js';
+
+function mediaProvider() {
+  const source = 'https://drive.internal/media/photo-1';
+  return {
+    async listMedia() {
+      return [{ media_id: 'photo-1', type: 'PHOTO', mime_type: 'image/jpeg', width: 1200, height: 800, duration_ms: null, created_at_epoch_ms: 1700000000000, thumbnail_url: 'https://drive.internal/thumb/photo-1', source_url: source }];
+    },
+    async openMedia(url) {
+      assert.equal(url, source);
+      return new Response('image-bytes', { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    },
+  };
+}
+
+async function authenticatedMediaServer() {
+  const ctx = await startServer({ provider: mediaProvider() });
+  const keyPair = generateKeyPair();
+  const auth = await registerAndVerify(ctx.base, { installationId: 'media-inst', keyPair });
+  ctx.storage.createOrganization('org-1', 'Test Org', Date.now());
+  ctx.storage.addMembership('media-inst', 'org-1', 'ACTIVE', Date.now());
+  return { ctx, token: auth.verify.body.session_token };
+}
+
+test('media listing is organization-scoped and never exposes provider URLs', async () => {
+  const { ctx, token } = await authenticatedMediaServer();
+  try {
+    const res = await get(ctx.base, '/api/v1/media?organization_id=org-1', { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.media[0].media_id, 'photo-1');
+    assert.equal(res.body.media[0].thumbnail_url, null);
+    assert.equal(JSON.stringify(res.body).includes('drive.internal'), false);
+  } finally { await ctx.close(); }
+});
+
+test('media view creates a short-lived installation-bound gateway grant', async () => {
+  const { ctx, token } = await authenticatedMediaServer();
+  try {
+    const res = await post(ctx.base, '/api/v1/media/photo-1/view', {}, { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.content_url, '/api/v1/media/photo-1/content');
+    assert.equal(typeof res.body.access_token, 'string');
+    assert.equal(res.body.expires_at_epoch_ms > Date.now(), true);
+    assert.equal(res.body.content_url.includes('drive.internal'), false);
+  } finally { await ctx.close(); }
+});
+
+test('media content requires the issued view token', async () => {
+  const { ctx, token } = await authenticatedMediaServer();
+  try {
+    const grant = await post(ctx.base, '/api/v1/media/photo-1/view', {}, { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    const denied = await fetch(`${ctx.base}${grant.body.content_url}`, { headers: { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' } });
+    assert.equal(denied.status, 400);
+    const allowed = await fetch(`${ctx.base}${grant.body.content_url}`, { headers: { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1', 'X-Media-View-Token': grant.body.access_token } });
+    assert.equal(allowed.status, 200);
+    assert.equal(await allowed.text(), 'image-bytes');
+  } finally { await ctx.close(); }
+});
