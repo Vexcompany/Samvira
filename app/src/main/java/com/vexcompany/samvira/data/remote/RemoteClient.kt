@@ -22,7 +22,8 @@ interface RemoteClient {
      * Lists the organizations this installation belongs to. Requires a valid
      * bearer session; membership claims always come from the server.
      */
-    suspend fun listOrganizations(sessionToken: String): ApiResult<OrganizationsResponse>
+    suspend fun listOrganizations(sessionToken: String): ApiResult<OrganizationsResponse> =
+        throw UnsupportedOperationException("Organization operations are not implemented by this client")
 
     /**
      * Fetches the context of a single organization. The client states its
@@ -33,5 +34,6 @@ interface RemoteClient {
     suspend fun organizationContext(
         sessionToken: String,
         organizationId: String,
-    ): ApiResult<OrganizationContextResponse>
+    ): ApiResult<OrganizationContextResponse> =
+        throw UnsupportedOperationException("Organization operations are not implemented by this client")
 }
