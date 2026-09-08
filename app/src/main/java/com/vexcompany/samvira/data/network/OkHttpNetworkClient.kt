@@ -43,6 +43,8 @@ class OkHttpNetworkClient(
                         return@withContext NetworkResult.Failure(
                             reason = FailureReason.HTTP_ERROR,
                             message = "HTTP $statusCode",
+                            statusCode = statusCode,
+                            body = body,
                         )
                     }
 

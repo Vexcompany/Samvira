@@ -26,6 +26,13 @@ sealed interface NetworkResult {
     data class Failure(
         val reason: FailureReason,
         val message: String? = null,
+        /**
+         * Present only for [FailureReason.HTTP_ERROR]: the raw response status
+         * and body, so the contract layer can decode a structured error
+         * envelope. Transport-level failures leave both null.
+         */
+        val statusCode: Int? = null,
+        val body: ByteArray? = null,
     ) : NetworkResult
 }
 

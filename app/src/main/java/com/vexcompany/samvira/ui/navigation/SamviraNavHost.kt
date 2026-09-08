@@ -36,7 +36,12 @@ fun SamviraNavHost(
     ) {
         composable(Routes.HOME) {
             val viewModel: HomeViewModel = viewModel {
-                HomeViewModel(identityRepository = container.identityRepository)
+                HomeViewModel(
+                    identityRepository = container.identityRepository,
+                    authRepository = container.authRepository,
+                    organizationRepository = container.organizationRepository,
+                    organizationSelection = container.organizationSelection,
+                )
             }
             HomeScreen(viewModel = viewModel)
         }

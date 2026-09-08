@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -22,12 +23,21 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Development endpoint: the Android emulator's alias for the host
+            // machine running the local backend. Not a production endpoint.
+            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8787/\"")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Fail closed: there is intentionally no default production
+            // endpoint. A release build refuses to run until a real backend
+            // base URL is configured.
+            buildConfigField("String", "API_BASE_URL", "\"\"")
         }
     }
 
@@ -42,6 +52,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -62,6 +73,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
     implementation(platform(libs.androidx.compose.bom))
