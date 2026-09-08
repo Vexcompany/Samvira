@@ -16,4 +16,5 @@ data class MediaViewGrant(
     val mimeType: String,
     val expiresAtEpochMs: Long,
     val contentUrl: String,
+    val accessToken: String,
 )
