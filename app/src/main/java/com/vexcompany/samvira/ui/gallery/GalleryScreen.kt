@@ -1,5 +1,6 @@
 package com.vexcompany.samvira.ui.gallery
 
+import android.app.Activity
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,17 +30,20 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaType
+import com.vexcompany.samvira.security.ScreenGuard
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +51,11 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(viewModel: GalleryViewModel) {
+    val context = LocalContext.current
+    DisposableEffect(context) {
+        (context as? Activity)?.let(ScreenGuard::enable)
+        onDispose { (context as? Activity)?.let(ScreenGuard::disable) }
+    }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     when (state) {
         GalleryUiState.Loading -> CenteredMessage { CircularProgressIndicator() }
@@ -65,18 +74,12 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                         )
                         ScrollableTabRow(selectedTabIndex = state.mode.ordinal) {
                             GalleryMode.entries.forEach { mode ->
-                                Tab(
-                                    selected = state.mode == mode,
-                                    onClick = { viewModel.setMode(mode) },
-                                    text = { Text(mode.label()) },
-                                )
+                                Tab(selected = state.mode == mode, onClick = { viewModel.setMode(mode) }, text = { Text(mode.label()) })
                             }
                         }
                     }
                 },
-            ) { padding ->
-                GalleryContent(state, padding, viewModel)
-            }
+            ) { padding -> GalleryContent(state, padding, viewModel) }
             state.selected?.let { selected -> MediaDetailDialog(state, selected, viewModel) }
         }
     }
@@ -85,9 +88,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 @Composable
 private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val query = state.searchQuery.trim().lowercase(Locale.ROOT)
-    val filtered = state.items.filter { item ->
-        query.isEmpty() || item.mediaId.lowercase(Locale.ROOT).contains(query) || item.mimeType.lowercase(Locale.ROOT).contains(query)
-    }
+    val filtered = state.items.filter { item -> query.isEmpty() || item.mediaId.lowercase(Locale.ROOT).contains(query) || item.mimeType.lowercase(Locale.ROOT).contains(query) }
     if (filtered.isEmpty()) {
         CenteredMessage(padding) { Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.") }
         return
@@ -101,13 +102,7 @@ private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, 
 
 @Composable
 private fun MediaGrid(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+    LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(items, key = { it.mediaId }) { item -> MediaTile(item, state, viewModel) }
     }
 }
@@ -117,9 +112,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
     val groups = items.groupBy { dayLabel(it.createdAtEpochMs) }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp)) {
         groups.forEach { (day, dayItems) ->
-            item(key = "header-$day") {
-                Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp))
-            }
+            item(key = "header-$day") { Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp)) }
             item(key = "media-$day") { MediaRows(dayItems, state, viewModel) }
         }
     }
@@ -157,22 +150,10 @@ private fun MediaRows(items: List<MediaItem>, state: GalleryUiState.Ready, viewM
 private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel, modifier: Modifier = Modifier) {
     androidx.compose.runtime.LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
     val bitmap = state.thumbnails[item.mediaId]?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { viewModel.openMedia(item) },
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) {
-            Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else if (item.mediaId in state.loadingThumbnails) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        } else {
-            Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
-        }
+    Box(modifier = modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.openMedia(item) }, contentAlignment = Alignment.Center) {
+        if (bitmap != null) Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else if (item.mediaId in state.loadingThumbnails) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        else Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
     }
 }
 
