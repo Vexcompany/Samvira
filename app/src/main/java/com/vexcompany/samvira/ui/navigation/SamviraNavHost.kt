@@ -7,7 +7,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.vexcompany.samvira.core.di.AppContainer
-import com.vexcompany.samvira.domain.org.OrganizationSelection
 import com.vexcompany.samvira.ui.gallery.GalleryScreen
 import com.vexcompany.samvira.ui.gallery.GalleryViewModel
 import com.vexcompany.samvira.ui.home.HomeScreen
@@ -42,10 +41,8 @@ fun SamviraNavHost(
             val viewModel: GalleryViewModel = viewModel {
                 GalleryViewModel(
                     mediaRepository = container.mediaRepository,
-                    sessionTokenProvider = { container.sessionStore.currentSession()?.token },
-                    organizationIdProvider = {
-                        (container.organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
-                    },
+                    sessionStore = container.sessionStore,
+                    organizationSelection = container.organizationSelection,
                 )
             }
             GalleryScreen(viewModel = viewModel)
