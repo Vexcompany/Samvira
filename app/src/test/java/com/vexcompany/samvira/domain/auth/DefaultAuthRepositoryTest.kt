@@ -59,8 +59,6 @@ class DefaultAuthRepositoryTest {
         assertEquals("session-token", persisted?.token)
         assertEquals("inst-1", persisted?.installationId)
 
-        // The signature must be the base64url encoding of the Keystore's
-        // signature over the exact nonce the server issued.
         val expectedSignature = Base64.getUrlEncoder()
             .withoutPadding()
             .encodeToString(ByteArray(64) { 0x01 })
@@ -133,6 +131,9 @@ class DefaultAuthRepositoryTest {
             identityRepository = FakeIdentityRepository(),
             keyStore = FakeKeyStore(),
             remoteClient = FakeRemoteClient(
+                challengeResult = {
+                    ApiResult.Success(ChallengeResponse("ch-1", nonceB64, now + 60_000L))
+                },
                 verifyResult = { ApiResult.ApiError("INVALID_SIGNATURE", "bad", 401) },
             ),
             sessionStore = FakeSessionStore(),
