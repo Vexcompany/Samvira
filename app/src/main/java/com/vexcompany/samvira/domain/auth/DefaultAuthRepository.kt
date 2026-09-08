@@ -10,14 +10,8 @@ import com.vexcompany.samvira.data.remote.VerifyRequest
 import com.vexcompany.samvira.domain.identity.InstallationIdentityRepository
 import com.vexcompany.samvira.security.keystore.InstallKeyStore
 import java.util.Base64
+import kotlinx.coroutines.CancellationException
 
-/**
- * Orchestrates the register → challenge → sign → verify flow.
- *
- * The private key never leaves the Keystore: the repository receives only the
- * nonce bytes, calls [InstallKeyStore.sign], and forwards the signature. The
- * session token is held as a [SessionToken] whose string form is redacted.
- */
 class DefaultAuthRepository(
     private val identityRepository: InstallationIdentityRepository,
     private val keyStore: InstallKeyStore,
@@ -27,103 +21,62 @@ class DefaultAuthRepository(
 ) : AuthRepository {
 
     override suspend fun establishSession(): AuthResult {
-        val identity = try {
-            identityRepository.currentIdentity()
-        } catch (e: Exception) {
-            return AuthResult.Failure(AuthError.KEYSTORE)
-        }
+        val identity = try { identityRepository.currentIdentity() }
+        catch (e: Exception) { return AuthResult.Failure(AuthError.KEYSTORE) }
 
-        when (
-            val registration = remoteClient.register(
-                RegisterRequest(
-                    installation_id = identity.installationId,
-                    public_key_pem = identity.publicKeyPem,
-                ),
-            )
-        ) {
+        when (val registration = remoteClient.register(RegisterRequest(identity.installationId, identity.publicKeyPem))) {
             is ApiResult.NetworkError -> return AuthResult.Failure(AuthError.NETWORK)
             is ApiResult.ApiError -> return AuthResult.Failure(mapApiError(registration.code))
             is ApiResult.Success -> Unit
         }
-
         val challenge = when (val result = remoteClient.requestChallenge(identity.installationId)) {
             is ApiResult.NetworkError -> return AuthResult.Failure(AuthError.NETWORK)
             is ApiResult.ApiError -> return AuthResult.Failure(mapApiError(result.code))
             is ApiResult.Success -> result.value
         }
-
         val nonce = decodeNonce(challenge) ?: return AuthResult.Failure(AuthError.MALFORMED_CHALLENGE)
-        if (challenge.expires_at_epoch_ms <= clock()) {
-            return AuthResult.Failure(AuthError.CHALLENGE_EXPIRED)
-        }
-
-        val signature = try {
-            keyStore.sign(nonce)
-        } catch (e: Exception) {
-            return AuthResult.Failure(AuthError.KEYSTORE)
-        }
-
-        val verification = when (
-            val result = remoteClient.verify(
-                VerifyRequest(
-                    installation_id = identity.installationId,
-                    challenge_id = challenge.challenge_id,
-                    signature_b64 = b64url(signature),
-                ),
-            )
-        ) {
+        if (challenge.expires_at_epoch_ms <= clock()) return AuthResult.Failure(AuthError.CHALLENGE_EXPIRED)
+        val signature = try { keyStore.sign(nonce) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { return AuthResult.Failure(AuthError.KEYSTORE) }
+        val verification = when (val result = remoteClient.verify(VerifyRequest(identity.installationId, challenge.challenge_id, b64url(signature)))) {
             is ApiResult.NetworkError -> return AuthResult.Failure(AuthError.NETWORK)
             is ApiResult.ApiError -> return AuthResult.Failure(mapApiError(result.code))
             is ApiResult.Success -> result.value
         }
-
-        val session = Session(
-            token = SessionToken(verification.session_token),
-            installationId = identity.installationId,
-            expiresAtEpochMs = verification.session_expires_at_epoch_ms,
-        )
-        sessionStore.save(
-            SessionRecord(
-                token = verification.session_token,
-                installationId = identity.installationId,
-                expiresAtEpochMs = verification.session_expires_at_epoch_ms,
-            ),
-        )
+        val session = Session(SessionToken(verification.session_token), identity.installationId, verification.session_expires_at_epoch_ms)
+        try {
+            sessionStore.save(SessionRecord(verification.session_token, identity.installationId, verification.session_expires_at_epoch_ms))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return AuthResult.Failure(AuthError.STORAGE)
+        }
         return AuthResult.Success(session)
     }
 
     override suspend fun currentSession(): SessionState {
-        val record = sessionStore.load() ?: return SessionState.None
+        val record = try { sessionStore.load() } catch (_: Exception) { return SessionState.None }
+            ?: return SessionState.None
         if (record.expiresAtEpochMs <= clock()) {
-            sessionStore.clear()
+            try { sessionStore.clear() } catch (_: Exception) {}
             return SessionState.None
         }
-        return SessionState.Active(
-            Session(
-                token = SessionToken(record.token),
-                installationId = record.installationId,
-                expiresAtEpochMs = record.expiresAtEpochMs,
-            ),
-        )
+        return SessionState.Active(Session(SessionToken(record.token), record.installationId, record.expiresAtEpochMs))
     }
 
     override suspend fun signOut() {
-        val record = sessionStore.load()
+        val record = try { sessionStore.load() } catch (_: Exception) { null }
         if (record != null) {
-            remoteClient.revokeSession(record.token)
+            try { remoteClient.revokeSession(record.token) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
         }
-        sessionStore.clear()
+        try { sessionStore.clear() } catch (_: Exception) {}
     }
 
     private fun decodeNonce(challenge: ChallengeResponse): ByteArray? = try {
-        val nonce = Base64.getUrlDecoder().decode(challenge.nonce_b64)
-        if (nonce.isEmpty()) null else nonce
-    } catch (e: IllegalArgumentException) {
-        null
-    }
-
-    private fun b64url(bytes: ByteArray): String =
-        Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        Base64.getUrlDecoder().decode(challenge.nonce_b64).takeIf { it.isNotEmpty() }
+    } catch (_: IllegalArgumentException) { null }
+    private fun b64url(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
     private fun mapApiError(code: String): AuthError = when (code) {
         "INSTALLATION_CONFLICT" -> AuthError.INSTALLATION_CONFLICT
@@ -135,6 +88,8 @@ class DefaultAuthRepository(
         "INVALID_SIGNATURE" -> AuthError.INVALID_SIGNATURE
         "MALFORMED_REQUEST" -> AuthError.MALFORMED_REQUEST
         "MALFORMED_RESPONSE" -> AuthError.MALFORMED_RESPONSE
+        "REGISTRATION_CAPACITY_REACHED" -> AuthError.NETWORK
+        "RATE_LIMITED" -> AuthError.NETWORK
         "SESSION_INVALID", "SESSION_EXPIRED", "SESSION_REVOKED" -> AuthError.SESSION_REJECTED
         else -> AuthError.UNKNOWN
     }
