@@ -18,4 +18,15 @@ interface RemoteClient {
 
     suspend fun requestMediaView(sessionToken: String, organizationId: String, mediaId: String): ApiResult<MediaViewResponse> =
         throw UnsupportedOperationException("Media operations are not implemented by this client")
+
+    suspend fun fetchMediaThumbnail(sessionToken: String, organizationId: String, mediaId: String): ApiResult<ByteArray> =
+        throw UnsupportedOperationException("Media thumbnail operations are not implemented by this client")
+
+    suspend fun fetchMediaContent(
+        sessionToken: String,
+        organizationId: String,
+        mediaId: String,
+        viewToken: String,
+    ): ApiResult<ByteArray> =
+        throw UnsupportedOperationException("Media content operations are not implemented by this client")
 }
