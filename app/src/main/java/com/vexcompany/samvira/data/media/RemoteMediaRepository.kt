@@ -26,10 +26,10 @@ class RemoteMediaRepository(
     }
 
     override suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray> {
-        thumbnailCache.read(mediaId)?.let { return MediaResult.Success(it) }
+        thumbnailCache.read(organizationId, mediaId)?.let { return MediaResult.Success(it) }
         return when (val result = remoteClient.fetchMediaThumbnail(sessionToken, organizationId, mediaId)) {
             is ApiResult.Success -> {
-                thumbnailCache.write(mediaId, result.value)
+                thumbnailCache.write(organizationId, mediaId, result.value)
                 MediaResult.Success(result.value)
             }
             is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
