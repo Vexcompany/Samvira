@@ -41,12 +41,32 @@ test('media listing is organization-scoped and never exposes provider URLs', asy
 test('authorized thumbnail gateway never exposes the provider URL', async () => {
   const { ctx, token } = await authenticatedMediaServer();
   try {
-    const denied = await get(ctx.base, '/api/v1/media/photo-1/thumbnail');
+    const denied = await fetch(`${ctx.base}/api/v1/media/photo-1/thumbnail`);
     assert.equal(denied.status, 401);
-    const allowed = await get(ctx.base, '/api/v1/media/photo-1/thumbnail', { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' });
+    const allowed = await fetch(`${ctx.base}/api/v1/media/photo-1/thumbnail`, { headers: { Authorization: `Bearer ${token}`, 'X-Organization-Id': 'org-1' } });
     assert.equal(allowed.status, 200);
     assert.equal(allowed.headers.get('content-type'), 'image/webp');
     assert.equal(await allowed.text(), 'thumbnail-bytes');
+  } finally { await ctx.close(); }
+});
+
+test('thumbnail gateway rejects provider responses with unsafe content types', async () => {
+  const provider = {
+    async listMedia() {
+      return [{ media_id: 'photo-1', type: 'PHOTO', mime_type: 'image/jpeg', width: 10, height: 10, duration_ms: null, created_at_epoch_ms: 1700000000000, thumbnail_url: 'https://drive.internal/thumb/photo-1', source_url: 'https://drive.internal/media/photo-1' }];
+    },
+    async openMedia(url) {
+      assert.equal(url, 'https://drive.internal/thumb/photo-1');
+      return new Response('bad', { status: 200, headers: { 'content-type': 'text/html' } });
+    },
+  };
+  const ctx = await startServer({ provider });
+  const auth = await registerAndVerify(ctx.base, { installationId: 'unsafe-thumb', keyPair: generateKeyPair() });
+  ctx.storage.createOrganization('org-1', 'Test Org', Date.now());
+  ctx.storage.addMembership('unsafe-thumb', 'org-1', 'ACTIVE', Date.now());
+  try {
+    const res = await fetch(`${ctx.base}/api/v1/media/photo-1/thumbnail`, { headers: { Authorization: `Bearer ${auth.verify.body.session_token}`, 'X-Organization-Id': 'org-1' } });
+    assert.equal(res.status, 502);
   } finally { await ctx.close(); }
 });
 
