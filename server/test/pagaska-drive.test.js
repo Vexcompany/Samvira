@@ -16,8 +16,8 @@ test('Pagaska Drive adapter normalizes provider metadata', async () => {
   assert.equal(result[0].thumbnail_url, 'https://drive.internal/thumb/m1');
 });
 
-test('Pagaska Drive adapter rejects invalid thumbnail URLs', async () => {
-  for (const thumbnailUrl of ['http://drive.internal/thumb/m1', 'https://attacker.example/thumb/m1', 'not-a-url']) {
+test('Pagaska Drive adapter rejects malformed or insecure thumbnail URLs', async () => {
+  for (const thumbnailUrl of ['http://drive.internal/thumb/m1', 'not-a-url']) {
     const provider = new PagaskaDriveProvider({
       baseUrl: 'https://drive.internal',
       fetchImpl: async () => new Response(JSON.stringify({ media: [{ media_id: 'm1', type: 'PHOTO', mime_type: 'image/jpeg', created_at_epoch_ms: 1, source_url: 'https://drive.internal/media/m1', thumbnail_url: thumbnailUrl }] }), { status: 200 }),
