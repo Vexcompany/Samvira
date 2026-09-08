@@ -8,12 +8,22 @@ test('Pagaska Drive adapter normalizes provider metadata', async () => {
     fetchImpl: async (url, options) => {
       assert.equal(url, 'https://drive.internal/v1/organizations/org%2F1/media');
       assert.equal(options.redirect, 'error');
-      return new Response(JSON.stringify({ media: [{ media_id: 'm1', type: 'PHOTO', mime_type: 'image/jpeg', created_at_epoch_ms: 1, source_url: 'https://drive.internal/media/m1' }] }), { status: 200 });
+      return new Response(JSON.stringify({ media: [{ media_id: 'm1', type: 'PHOTO', mime_type: 'image/jpeg', created_at_epoch_ms: 1, source_url: 'https://drive.internal/media/m1', thumbnail_url: 'https://drive.internal/thumb/m1' }] }), { status: 200 });
     },
   });
   const result = await provider.listMedia('org/1');
   assert.equal(result[0].media_id, 'm1');
-  assert.equal(result[0].thumbnail_url, null);
+  assert.equal(result[0].thumbnail_url, 'https://drive.internal/thumb/m1');
+});
+
+test('Pagaska Drive adapter rejects invalid thumbnail URLs', async () => {
+  for (const thumbnailUrl of ['http://drive.internal/thumb/m1', 'https://attacker.example/thumb/m1', 'not-a-url']) {
+    const provider = new PagaskaDriveProvider({
+      baseUrl: 'https://drive.internal',
+      fetchImpl: async () => new Response(JSON.stringify({ media: [{ media_id: 'm1', type: 'PHOTO', mime_type: 'image/jpeg', created_at_epoch_ms: 1, source_url: 'https://drive.internal/media/m1', thumbnail_url: thumbnailUrl }] }), { status: 200 }),
+    });
+    await assert.rejects(() => provider.listMedia('org-1'), (error) => error.code === 'MEDIA_PROVIDER_ERROR');
+  }
 });
 
 test('Pagaska Drive adapter rejects source URLs outside configured origin', async () => {
