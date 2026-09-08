@@ -40,19 +40,15 @@ Versioned API contract, typed DTOs/errors, installation registration, challenge/
 ### 0.4 — Organization & Membership Foundation — completed
 Organization/membership models and contracts, server-controlled membership authorization, installation membership bootstrap, maximum 2 organizations per installation, organization selection/context, membership states, cross-organization isolation, and regression tests.
 
-### 0.5 — Pagaska Drive Media Bridge — in hardening/finalization
-Implemented provider abstraction, organization-scoped media listing, provider-origin validation, redirect blocking, canonical MIME validation, media view grants, session-bounded grant expiry, authorized content streaming, raw provider URL stripping, and regression tests.
+### 0.5 — Pagaska Drive Media Bridge — completed
+Provider abstraction, organization-scoped media listing, provider-origin validation, redirect blocking, canonical MIME validation, safe thumbnail/preview gateway delivery, media view grants, session-bounded grant expiry, authorized content streaming, raw provider URL stripping, upstream stream-failure containment, and regression coverage are implemented and validated.
 
-Before declaring 0.5 fully complete, finish/verify:
-- safe thumbnail/preview delivery through the authorization boundary;
-- regression coverage for an upstream stream failing after response start;
-- final audit of the merged Arena implementation, especially `server/src/api.js`, `server/src/storage.js`, Android DTO/container wiring, and compatibility with 0.3/0.4 behavior;
-- build/tests and final diff/security review.
+Quality gate completed: Android build/lint/JVM tests/instrumented-test compilation and backend Node test suite are covered by CI, with the final hardening cycle resolving release endpoint validation, provider redirect/MIME boundaries, public-key validation, rate/capacity limits, atomic challenge/session creation, media grant lifetime, and stream failure handling.
 
-Do not broaden 0.5 into gallery UI.
+Known limitation: the current Pagaska Drive integration is a provider bridge and testable contract, not proof of a deployed production Pagaska Drive service. Production credentials, endpoints, and provider capabilities must be supplied separately and must not be invented in SAMVIRA.
 
 ### 0.6+ — Gallery / Timeline / Album Experience
-After 0.5 is fully validated, build the Google Photos-like viewer: photo/video grid, timeline, albums, search/discovery, media detail viewing, privacy-aware rendering, and appropriate cache/offline behavior. Controlled original-download requests remain a later security-sensitive feature.
+Next target: build the Google Photos-like viewer on top of the validated media bridge: photo/video grid, timeline, albums, search/discovery, media detail viewing, privacy-aware rendering, and appropriate cache/offline behavior. Controlled original-download requests remain a later security-sensitive feature.
 
 ## 5. Pagaska Drive boundary
 
@@ -102,4 +98,4 @@ Before declaring a milestone complete:
 
 Act as a senior Android/security-conscious product engineer. Do not merely generate snippets: inspect the repository, implement changes directly, test them, and leave a coherent, auditable state. When ambiguity exists, choose the smallest reversible design and document it.
 
-**Current target:** finish and validate Milestone 0.5. Only after its quality gate passes should work move to Milestone 0.6.
+**Current target:** Milestone 0.6 — Gallery / Timeline / Album Experience.
