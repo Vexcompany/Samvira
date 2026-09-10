@@ -31,7 +31,7 @@ private fun buildSearchText(item: MediaItem): String {
     ).joinToString(" ")
     val dimensions = listOfNotNull(item.width, item.height)
         .takeIf { it.size == 2 }
-        ?.joinToString("x")
+        ?.let { (width, height) -> "$width $height ${width}x$height" }
         .orEmpty()
     val durationSeconds = item.durationMs?.div(1000)
     val durationText = durationSeconds?.let { "$it ${it}s ${it / 60}m" }.orEmpty()
