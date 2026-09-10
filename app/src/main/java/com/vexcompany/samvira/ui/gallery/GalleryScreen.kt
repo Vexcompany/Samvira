@@ -23,12 +23,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -74,6 +76,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                             singleLine = true,
                             label = { Text("Search photos and videos") },
+                            placeholder = { Text("Try: photo, video, 2026, 1920x1080") },
                         )
                         ScrollableTabRow(selectedTabIndex = currentState.mode.ordinal) {
                             GalleryMode.entries.forEach { mode ->
@@ -97,15 +100,10 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 
 @Composable
 private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    val query = state.searchQuery.trim().lowercase(Locale.ROOT)
-    val searched = state.items.filter { item ->
-        query.isEmpty() ||
-            item.mediaId.lowercase(Locale.ROOT).contains(query) ||
-            item.mimeType.lowercase(Locale.ROOT).contains(query)
-    }
+    val searched = searchMedia(state.items, state.searchQuery)
     if (searched.isEmpty()) {
         CenteredMessage(padding) {
-            Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.")
+            Text(if (state.searchQuery.isBlank()) "No photos or videos yet." else "No matching media.")
         }
         return
     }
@@ -330,8 +328,10 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
     val thumbnail = thumbnailBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     AlertDialog(
         onDismissRequest = viewModel::closeMedia,
-        confirmButton = {},
-        title = { Text(if (item.type == MediaType.VIDEO) "Video" else "Photo") },
+        confirmButton = {
+            TextButton(onClick = viewModel::closeMedia) { Text("Close") }
+        },
+        title = { Text(if (item.type == MediaType.VIDEO) "Video details" else "Photo details") },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
@@ -353,11 +353,40 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                     }
                     else -> Text("Media preview is unavailable.")
                 }
-                Text(item.mimeType, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                DetailRow("Type", if (item.type == MediaType.VIDEO) "Video" else "Photo")
+                DetailRow("Format", item.mimeType)
+                DetailRow("Captured", detailDateLabel(item.createdAtEpochMs))
+                item.width?.let { width -> item.height?.let { height -> DetailRow("Dimensions", "$width × $height") } }
+                item.durationMs?.let { DetailRow("Duration", formatDuration(it)) }
+                DetailRow("Media ID", item.mediaId)
             }
         },
     )
 }
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 12.dp))
+    }
+}
+
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = (durationMs.coerceAtLeast(0L) / 1000L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+    else "%d:%02d".format(minutes, seconds)
+}
+
+private fun detailDateLabel(epochMs: Long): String =
+    SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMs))
 
 @Composable
 private fun CenteredMessage(padding: PaddingValues = PaddingValues(0.dp), content: @Composable () -> Unit) {
