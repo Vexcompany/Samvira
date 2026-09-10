@@ -30,6 +30,7 @@ sealed interface GalleryUiState {
         val loadingContent: Boolean = false,
         val searchQuery: String = "",
         val mode: GalleryMode = GalleryMode.GALLERY,
+        val selectedAlbumId: String? = null,
         val refreshing: Boolean = false,
     ) : GalleryUiState
     data class Error(val code: String, val message: String?) : GalleryUiState
@@ -61,11 +62,13 @@ class GalleryViewModel(
             when (val result = mediaRepository.listMedia(session.token, organizationId)) {
                 is MediaResult.Success -> {
                     val old = _uiState.value as? GalleryUiState.Ready
+                    val items = result.value.sortedByDescending { it.createdAtEpochMs }
                     _uiState.value = GalleryUiState.Ready(
-                        items = result.value.sortedByDescending { it.createdAtEpochMs },
-                        thumbnails = old?.thumbnails?.filterKeys { id -> result.value.any { it.mediaId == id } } ?: emptyMap(),
+                        items = items,
+                        thumbnails = old?.thumbnails?.filterKeys { id -> items.any { it.mediaId == id } } ?: emptyMap(),
                         searchQuery = old?.searchQuery.orEmpty(),
                         mode = old?.mode ?: GalleryMode.GALLERY,
+                        selectedAlbumId = old?.selectedAlbumId?.takeIf { id -> albumContains(id, items) },
                     )
                 }
                 is MediaResult.Failure -> _uiState.value = GalleryUiState.Error(result.code, result.message)
@@ -75,6 +78,7 @@ class GalleryViewModel(
 
     fun setMode(mode: GalleryMode) = _uiState.updateReady { it.copy(mode = mode) }
     fun setSearchQuery(query: String) = _uiState.updateReady { it.copy(searchQuery = query) }
+    fun setAlbum(albumId: String?) = _uiState.updateReady { it.copy(selectedAlbumId = albumId) }
 
     fun loadThumbnail(mediaId: String) {
         val state = _uiState.value as? GalleryUiState.Ready ?: return
@@ -121,6 +125,22 @@ class GalleryViewModel(
 
     fun closeMedia() = _uiState.updateReady { it.copy(selected = null, selectedGrant = null, selectedContent = null, loadingContent = false) }
 
+    private fun albumContains(albumId: String, items: List<MediaItem>): Boolean = when {
+        albumId == ALBUM_PHOTOS -> items.any { it.type == MediaType.PHOTO }
+        albumId == ALBUM_VIDEOS -> items.any { it.type == MediaType.VIDEO }
+        albumId.startsWith(ALBUM_MONTH_PREFIX) -> items.any { monthKey(it.createdAtEpochMs) == albumId.removePrefix(ALBUM_MONTH_PREFIX) }
+        else -> false
+    }
+
+    private fun monthKey(epochMs: Long): String =
+        java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.ROOT).format(java.util.Date(epochMs))
+
     private inline fun MutableStateFlow<GalleryUiState>.updateReady(transform: (GalleryUiState.Ready) -> GalleryUiState.Ready) =
         update { current -> if (current is GalleryUiState.Ready) transform(current) else current }
+
+    companion object {
+        const val ALBUM_PHOTOS = "photos"
+        const val ALBUM_VIDEOS = "videos"
+        const val ALBUM_MONTH_PREFIX = "month:"
+    }
 }
