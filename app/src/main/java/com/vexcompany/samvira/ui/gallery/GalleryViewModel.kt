@@ -51,7 +51,10 @@ class GalleryViewModel(
 
     fun refresh() {
         val refreshing = _uiState.value is GalleryUiState.Ready
-        _uiState.update { if (refreshing && it is GalleryUiState.Ready) it.copy(refreshing = true) else GalleryUiState.Loading }
+        _uiState.update { current ->
+            if (refreshing && current is GalleryUiState.Ready) current.copy(refreshing = true)
+            else GalleryUiState.Loading
+        }
         viewModelScope.launch {
             val session = sessionStore.load()
             val organizationId = (organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
@@ -69,15 +72,30 @@ class GalleryViewModel(
                         searchQuery = old?.searchQuery.orEmpty(),
                         mode = old?.mode ?: GalleryMode.GALLERY,
                         selectedAlbumId = old?.selectedAlbumId?.takeIf { id -> albumContains(id, items) },
+                        refreshing = false,
                     )
                 }
-                is MediaResult.Failure -> _uiState.value = GalleryUiState.Error(result.code, result.message)
+                is MediaResult.Failure -> {
+                    val old = _uiState.value as? GalleryUiState.Ready
+                    if (old != null) {
+                        _uiState.value = old.copy(refreshing = false)
+                    } else {
+                        _uiState.value = GalleryUiState.Error(result.code, result.message)
+                    }
+                }
             }
         }
     }
 
-    fun setMode(mode: GalleryMode) = _uiState.updateReady { it.copy(mode = mode, selectedAlbumId = if (mode == GalleryMode.ALBUMS) it.selectedAlbumId else null) }
-    fun setSearchQuery(query: String) = _uiState.updateReady { it.copy(searchQuery = query) }
+    fun setMode(mode: GalleryMode) = _uiState.updateReady {
+        it.copy(mode = mode, selectedAlbumId = if (mode == GalleryMode.ALBUMS) it.selectedAlbumId else null)
+    }
+
+    fun setSearchQuery(query: String) = _uiState.updateReady { state ->
+        val selectedAlbumId = state.selectedAlbumId?.takeIf { albumContains(it, searchMedia(state.items, query)) }
+        state.copy(searchQuery = query, selectedAlbumId = selectedAlbumId)
+    }
+
     fun setAlbum(albumId: String?) = _uiState.updateReady { it.copy(selectedAlbumId = albumId) }
 
     fun loadThumbnail(mediaId: String) {
