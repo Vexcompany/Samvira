@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -174,11 +175,7 @@ private fun TimelineHeader(epochMs: Long, count: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            dayLabel(epochMs),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Text(dayLabel(epochMs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "$count ${if (count == 1) "item" else "items"}",
             style = MaterialTheme.typography.labelMedium,
@@ -211,8 +208,8 @@ private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding:
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(albums.size, key = { albums[it].id }) { index ->
-            AlbumCard(albums[index], state, viewModel)
+        items(albums, key = { it.id }) { album ->
+            AlbumCard(album, state, viewModel)
         }
     }
 }
@@ -320,10 +317,7 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
         } else if (item.mediaId in state.loadingThumbnails) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
-            Text(
-                if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO",
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -359,11 +353,7 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                     }
                     else -> Text("Media preview is unavailable.")
                 }
-                Text(
-                    item.mimeType,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                Text(item.mimeType, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
             }
         },
     )
