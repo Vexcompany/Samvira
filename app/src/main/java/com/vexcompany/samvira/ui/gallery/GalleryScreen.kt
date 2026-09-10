@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
@@ -77,7 +79,10 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                             GalleryMode.entries.forEach { mode ->
                                 Tab(
                                     selected = currentState.mode == mode,
-                                    onClick = { viewModel.setMode(mode) },
+                                    onClick = {
+                                        viewModel.setMode(mode)
+                                        if (mode != GalleryMode.ALBUMS) viewModel.setAlbum(null)
+                                    },
                                     text = { Text(mode.label()) },
                                 )
                             }
@@ -93,21 +98,21 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 @Composable
 private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val query = state.searchQuery.trim().lowercase(Locale.ROOT)
-    val filtered = state.items.filter { item ->
+    val searched = state.items.filter { item ->
         query.isEmpty() ||
             item.mediaId.lowercase(Locale.ROOT).contains(query) ||
             item.mimeType.lowercase(Locale.ROOT).contains(query)
     }
-    if (filtered.isEmpty()) {
+    if (searched.isEmpty()) {
         CenteredMessage(padding) {
             Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.")
         }
         return
     }
     when (state.mode) {
-        GalleryMode.GALLERY -> MediaGrid(filtered, state, padding, viewModel)
-        GalleryMode.TIMELINE -> Timeline(filtered, state, padding, viewModel)
-        GalleryMode.ALBUMS -> Albums(filtered, state, padding, viewModel)
+        GalleryMode.GALLERY -> MediaGrid(searched, state, padding, viewModel)
+        GalleryMode.TIMELINE -> Timeline(searched, state, padding, viewModel)
+        GalleryMode.ALBUMS -> Albums(searched, state, padding, viewModel)
     }
 }
 
@@ -133,7 +138,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         groups.forEach { (day, dayItems) ->
-            stickyHeader(key = "timeline-header-$day") {
+            androidx.compose.foundation.lazy.stickyHeader(key = "timeline-header-$day") {
                 TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size)
             }
             item(key = "timeline-media-$day") {
@@ -170,11 +175,7 @@ private fun TimelineHeader(epochMs: Long, count: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            dayLabel(epochMs),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Text(dayLabel(epochMs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "$count ${if (count == 1) "item" else "items"}",
             style = MaterialTheme.typography.labelMedium,
@@ -183,28 +184,101 @@ private fun TimelineHeader(epochMs: Long, count: Int) {
     }
 }
 
+private data class Album(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val items: List<MediaItem>,
+)
+
 @Composable
 private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    val albums = items.groupBy { monthLabel(it.createdAtEpochMs) }
+    val albums = buildAlbums(items)
+    val selectedId = state.selectedAlbumId
+    if (selectedId != null) {
+        val album = albums.firstOrNull { it.id == selectedId }
+        if (album != null) {
+            AlbumDetail(album, state, padding, viewModel)
+            return
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        albums.forEach { (month, monthItems) ->
-            item(key = "album-$month") {
-                Column {
-                    Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "${monthItems.size} items",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
-                    MediaRows(monthItems.take(9), state, viewModel)
-                }
-            }
+        items(albums, key = { it.id }) { album ->
+            AlbumCard(album, state, viewModel)
         }
     }
+}
+
+@Composable
+private fun AlbumCard(album: Album, state: GalleryUiState.Ready, viewModel: GalleryViewModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { viewModel.setAlbum(album.id) }
+            .padding(10.dp),
+    ) {
+        MediaRows(album.items.take(4), state, viewModel)
+        Text(
+            album.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+        Text(
+            album.subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun AlbumDetail(album: Album, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.setAlbum(null) }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("‹ Albums", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "  ${album.items.size} ${if (album.items.size == 1) "item" else "items"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        MediaGrid(album.items, state, PaddingValues(0.dp), viewModel)
+    }
+}
+
+private fun buildAlbums(items: List<MediaItem>): List<Album> {
+    val albums = mutableListOf<Album>()
+    val photos = items.filter { it.type == MediaType.PHOTO }
+    val videos = items.filter { it.type == MediaType.VIDEO }
+    if (photos.isNotEmpty()) albums += Album(GalleryViewModel.ALBUM_PHOTOS, "Photos", "${photos.size} photos", photos)
+    if (videos.isNotEmpty()) albums += Album(GalleryViewModel.ALBUM_VIDEOS, "Videos", "${videos.size} videos", videos)
+
+    items.groupBy { monthKey(it.createdAtEpochMs) }
+        .toSortedMap(compareByDescending { it })
+        .forEach { (month, monthItems) ->
+            albums += Album(
+                id = GalleryViewModel.ALBUM_MONTH_PREFIX + month,
+                title = monthLabel(monthItems.first().createdAtEpochMs),
+                subtitle = "${monthItems.size} ${if (monthItems.size == 1) "item" else "items"}",
+                items = monthItems,
+            )
+        }
+    return albums
 }
 
 @Composable
@@ -221,7 +295,7 @@ private fun MediaRows(items: List<MediaItem>, state: GalleryUiState.Ready, viewM
 
 @Composable
 private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel, modifier: Modifier = Modifier) {
-    androidx.compose.runtime.LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
+    LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
     val bitmap = state.thumbnails[item.mediaId]
         ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     Box(
@@ -243,10 +317,7 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
         } else if (item.mediaId in state.loadingThumbnails) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
-            Text(
-                if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO",
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -282,11 +353,7 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                     }
                     else -> Text("Media preview is unavailable.")
                 }
-                Text(
-                    item.mimeType,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                Text(item.mimeType, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
             }
         },
     )
@@ -321,4 +388,5 @@ private fun isSameDay(first: Calendar, second: Calendar): Boolean =
         first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
         first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
 
+private fun monthKey(epochMs: Long): String = SimpleDateFormat("yyyy-MM", Locale.ROOT).format(Date(epochMs))
 private fun monthLabel(epochMs: Long): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(epochMs))
