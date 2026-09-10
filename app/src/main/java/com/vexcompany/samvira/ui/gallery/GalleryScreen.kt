@@ -134,7 +134,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
     ) {
         groups.forEach { (day, dayItems) ->
             stickyHeader(key = "timeline-header-$day") {
-                TimelineHeader(day, dayItems.size)
+                TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size)
             }
             item(key = "timeline-media-$day") {
                 Column(
@@ -161,7 +161,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
 }
 
 @Composable
-private fun TimelineHeader(day: String, count: Int) {
+private fun TimelineHeader(epochMs: Long, count: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -170,7 +170,11 @@ private fun TimelineHeader(day: String, count: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            dayLabel(epochMs),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
         Text(
             "$count ${if (count == 1) "item" else "items"}",
             style = MaterialTheme.typography.labelMedium,
