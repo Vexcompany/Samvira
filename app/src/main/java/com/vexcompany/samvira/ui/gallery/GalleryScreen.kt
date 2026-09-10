@@ -45,6 +45,7 @@ import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaType
 import com.vexcompany.samvira.security.ScreenGuard
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -74,7 +75,11 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
                         )
                         ScrollableTabRow(selectedTabIndex = currentState.mode.ordinal) {
                             GalleryMode.entries.forEach { mode ->
-                                Tab(selected = currentState.mode == mode, onClick = { viewModel.setMode(mode) }, text = { Text(mode.label()) })
+                                Tab(
+                                    selected = currentState.mode == mode,
+                                    onClick = { viewModel.setMode(mode) },
+                                    text = { Text(mode.label()) },
+                                )
                             }
                         }
                     }
@@ -88,9 +93,15 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 @Composable
 private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val query = state.searchQuery.trim().lowercase(Locale.ROOT)
-    val filtered = state.items.filter { item -> query.isEmpty() || item.mediaId.lowercase(Locale.ROOT).contains(query) || item.mimeType.lowercase(Locale.ROOT).contains(query) }
+    val filtered = state.items.filter { item ->
+        query.isEmpty() ||
+            item.mediaId.lowercase(Locale.ROOT).contains(query) ||
+            item.mimeType.lowercase(Locale.ROOT).contains(query)
+    }
     if (filtered.isEmpty()) {
-        CenteredMessage(padding) { Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.") }
+        CenteredMessage(padding) {
+            Text(if (query.isEmpty()) "No photos or videos yet." else "No matching media.")
+        }
         return
     }
     when (state.mode) {
@@ -102,31 +113,89 @@ private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, 
 
 @Composable
 private fun MediaGrid(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         items(items, key = { it.mediaId }) { item -> MediaTile(item, state, viewModel) }
     }
 }
 
 @Composable
 private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    val groups = items.groupBy { dayLabel(it.createdAtEpochMs) }
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp)) {
+    val groups = items.groupBy { dayKey(it.createdAtEpochMs) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         groups.forEach { (day, dayItems) ->
-            item(key = "header-$day") { Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp)) }
-            item(key = "media-$day") { MediaRows(dayItems, state, viewModel) }
+            stickyHeader(key = "timeline-header-$day") {
+                TimelineHeader(day, dayItems.size)
+            }
+            item(key = "timeline-media-$day") {
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    dayItems.chunked(3).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            rowItems.forEach { item ->
+                                MediaTile(item, state, viewModel, Modifier.weight(1f))
+                            }
+                            repeat(3 - rowItems.size) {
+                                Box(Modifier.weight(1f).aspectRatio(1f))
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun TimelineHeader(day: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(day, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            "$count ${if (count == 1) "item" else "items"}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
 private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val albums = items.groupBy { monthLabel(it.createdAtEpochMs) }
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         albums.forEach { (month, monthItems) ->
             item(key = "album-$month") {
                 Column {
                     Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("${monthItems.size} items", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp))
+                    Text(
+                        "${monthItems.size} items",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
                     MediaRows(monthItems.take(9), state, viewModel)
                 }
             }
@@ -149,11 +218,32 @@ private fun MediaRows(items: List<MediaItem>, state: GalleryUiState.Ready, viewM
 @Composable
 private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel, modifier: Modifier = Modifier) {
     androidx.compose.runtime.LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
-    val bitmap = state.thumbnails[item.mediaId]?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
-    Box(modifier = modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.openMedia(item) }, contentAlignment = Alignment.Center) {
-        if (bitmap != null) Image(bitmap = bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else if (item.mediaId in state.loadingThumbnails) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        else Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
+    val bitmap = state.thumbnails[item.mediaId]
+        ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { viewModel.openMedia(item) },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else if (item.mediaId in state.loadingThumbnails) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Text(
+                if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO",
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
 }
 
@@ -171,14 +261,28 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
                     state.loadingContent -> CircularProgressIndicator()
-                    bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
+                    bitmap != null -> Image(
+                        bitmap,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        contentScale = ContentScale.Fit,
+                    )
                     item.type == MediaType.VIDEO && thumbnail != null -> {
-                        Image(thumbnail, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
+                        Image(
+                            thumbnail,
+                            contentDescription = "Video preview",
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                            contentScale = ContentScale.Fit,
+                        )
                         Text("Video preview", modifier = Modifier.padding(top = 8.dp))
                     }
                     else -> Text("Media preview is unavailable.")
                 }
-                Text(item.mimeType, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    item.mimeType,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         },
     )
@@ -195,5 +299,22 @@ private fun GalleryMode.label(): String = when (this) {
     GalleryMode.ALBUMS -> "Albums"
 }
 
-private fun dayLabel(epochMs: Long): String = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault()).format(Date(epochMs))
+private fun dayKey(epochMs: Long): String = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(epochMs))
+
+private fun dayLabel(epochMs: Long): String {
+    val date = Calendar.getInstance().apply { timeInMillis = epochMs }
+    val today = Calendar.getInstance()
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    return when {
+        isSameDay(date, today) -> "Today"
+        isSameDay(date, yesterday) -> "Yesterday"
+        else -> SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault()).format(date.time)
+    }
+}
+
+private fun isSameDay(first: Calendar, second: Calendar): Boolean =
+    first.get(Calendar.ERA) == second.get(Calendar.ERA) &&
+        first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
+        first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
+
 private fun monthLabel(epochMs: Long): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(epochMs))
