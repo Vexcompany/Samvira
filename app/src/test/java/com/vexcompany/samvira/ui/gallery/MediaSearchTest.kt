@@ -26,7 +26,14 @@ class MediaSearchTest {
     @Test
     fun searchesAcrossDimensionsAndMediaId() {
         assertEquals(listOf(items[0]), searchMedia(items, "1920x1080"))
+        assertEquals(listOf(items[0]), searchMedia(items, "1920 1080"))
         assertEquals(listOf(items[1]), searchMedia(items, "video-2026-02"))
+    }
+
+    @Test
+    fun searchesAcrossDateAndDurationMetadata() {
+        assertEquals(listOf(items[0]), searchMedia(items, "2026 january"))
+        assertEquals(listOf(items[1]), searchMedia(items, "2m"))
     }
 
     @Test
