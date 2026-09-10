@@ -6,8 +6,8 @@ import com.vexcompany.samvira.data.auth.SessionStore
 import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaRepository
 import com.vexcompany.samvira.domain.media.MediaResult
-import com.vexcompany.samvira.domain.media.MediaViewGrant
 import com.vexcompany.samvira.domain.media.MediaType
+import com.vexcompany.samvira.domain.media.MediaViewGrant
 import com.vexcompany.samvira.domain.org.OrganizationSelection
 import com.vexcompany.samvira.domain.org.OrganizationSelectionStore
 import java.util.concurrent.ConcurrentHashMap
@@ -76,7 +76,7 @@ class GalleryViewModel(
         }
     }
 
-    fun setMode(mode: GalleryMode) = _uiState.updateReady { it.copy(mode = mode) }
+    fun setMode(mode: GalleryMode) = _uiState.updateReady { it.copy(mode = mode, selectedAlbumId = if (mode == GalleryMode.ALBUMS) it.selectedAlbumId else null) }
     fun setSearchQuery(query: String) = _uiState.updateReady { it.copy(searchQuery = query) }
     fun setAlbum(albumId: String?) = _uiState.updateReady { it.copy(selectedAlbumId = albumId) }
 
@@ -84,16 +84,19 @@ class GalleryViewModel(
         val state = _uiState.value as? GalleryUiState.Ready ?: return
         if (state.thumbnails.containsKey(mediaId) || thumbnailJobs.containsKey(mediaId)) return
         thumbnailJobs[mediaId] = viewModelScope.launch {
-            val session = sessionStore.load()
-            val organizationId = (organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
-            if (session == null || organizationId.isNullOrBlank()) return@launch
-            _uiState.updateReady { it.copy(loadingThumbnails = it.loadingThumbnails + mediaId) }
-            when (val result = mediaRepository.fetchThumbnail(session.token, organizationId, mediaId)) {
-                is MediaResult.Success -> _uiState.updateReady { it.copy(thumbnails = it.thumbnails + (mediaId to result.value)) }
-                is MediaResult.Failure -> Unit
+            try {
+                val session = sessionStore.load()
+                val organizationId = (organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
+                if (session == null || organizationId.isNullOrBlank()) return@launch
+                _uiState.updateReady { it.copy(loadingThumbnails = it.loadingThumbnails + mediaId) }
+                when (val result = mediaRepository.fetchThumbnail(session.token, organizationId, mediaId)) {
+                    is MediaResult.Success -> _uiState.updateReady { it.copy(thumbnails = it.thumbnails + (mediaId to result.value)) }
+                    is MediaResult.Failure -> Unit
+                }
+            } finally {
+                _uiState.updateReady { it.copy(loadingThumbnails = it.loadingThumbnails - mediaId) }
+                thumbnailJobs.remove(mediaId)
             }
-            _uiState.updateReady { it.copy(loadingThumbnails = it.loadingThumbnails - mediaId) }
-            thumbnailJobs.remove(mediaId)
         }
     }
 
