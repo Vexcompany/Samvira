@@ -35,8 +35,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,9 +102,7 @@ fun GalleryScreen(viewModel: GalleryViewModel) {
 private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val searched = searchMedia(state.items, state.searchQuery)
     if (searched.isEmpty()) {
-        CenteredMessage(padding) {
-            Text(if (state.searchQuery.isBlank()) "No photos or videos yet." else "No matching media.")
-        }
+        CenteredMessage(padding) { Text(if (state.searchQuery.isBlank()) "No photos or videos yet." else "No matching media.") }
         return
     }
     when (state.mode) {
@@ -116,13 +114,7 @@ private fun GalleryContent(state: GalleryUiState.Ready, padding: PaddingValues, 
 
 @Composable
 private fun MediaGrid(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+    LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(items, key = { it.mediaId }) { item -> MediaTile(item, state, viewModel) }
     }
 }
@@ -130,31 +122,15 @@ private fun MediaGrid(items: List<MediaItem>, state: GalleryUiState.Ready, paddi
 @Composable
 private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     val groups = items.groupBy { dayKey(it.createdAtEpochMs) }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         groups.forEach { (day, dayItems) ->
-            androidx.compose.foundation.lazy.stickyHeader(key = "timeline-header-$day") {
-                TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size)
-            }
+            androidx.compose.foundation.lazy.stickyHeader(key = "timeline-header-$day") { TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size) }
             item(key = "timeline-media-$day") {
-                Column(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     dayItems.chunked(3).forEach { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            rowItems.forEach { item ->
-                                MediaTile(item, state, viewModel, Modifier.weight(1f))
-                            }
-                            repeat(3 - rowItems.size) {
-                                Box(Modifier.weight(1f).aspectRatio(1f))
-                            }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            rowItems.forEach { item -> MediaTile(item, state, viewModel, Modifier.weight(1f)) }
+                            repeat(3 - rowItems.size) { Box(Modifier.weight(1f).aspectRatio(1f)) }
                         }
                     }
                 }
@@ -165,29 +141,13 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
 
 @Composable
 private fun TimelineHeader(epochMs: Long, count: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Text(dayLabel(epochMs), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            "$count ${if (count == 1) "item" else "items"}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text("$count ${if (count == 1) "item" else "items"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-private data class Album(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val items: List<MediaItem>,
-)
+private data class Album(val id: String, val title: String, val subtitle: String, val items: List<MediaItem>)
 
 @Composable
 private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
@@ -195,65 +155,28 @@ private fun Albums(items: List<MediaItem>, state: GalleryUiState.Ready, padding:
     val selectedId = state.selectedAlbumId
     if (selectedId != null) {
         val album = albums.firstOrNull { it.id == selectedId }
-        if (album != null) {
-            AlbumDetail(album, state, padding, viewModel)
-            return
-        }
+        if (album != null) { AlbumDetail(album, state, padding, viewModel); return }
     }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(albums, key = { it.id }) { album ->
-            AlbumCard(album, state, viewModel)
-        }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(albums, key = { it.id }) { album -> AlbumCard(album, state, viewModel) }
     }
 }
 
 @Composable
 private fun AlbumCard(album: Album, state: GalleryUiState.Ready, viewModel: GalleryViewModel) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { viewModel.setAlbum(album.id) }
-            .padding(10.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.setAlbum(album.id) }.padding(10.dp)) {
         MediaRows(album.items.take(4), state, viewModel)
-        Text(
-            album.title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 10.dp),
-        )
-        Text(
-            album.subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        Text(album.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
+        Text(album.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
 @Composable
 private fun AlbumDetail(album: Album, state: GalleryUiState.Ready, padding: PaddingValues, viewModel: GalleryViewModel) {
     Column(Modifier.fillMaxSize().padding(padding)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { viewModel.setAlbum(null) }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(modifier = Modifier.fillMaxWidth().clickable { viewModel.setAlbum(null) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("‹ Albums", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "  ${album.items.size} ${if (album.items.size == 1) "item" else "items"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("  ${album.items.size} ${if (album.items.size == 1) "item" else "items"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         MediaGrid(album.items, state, PaddingValues(0.dp), viewModel)
     }
@@ -265,17 +188,9 @@ private fun buildAlbums(items: List<MediaItem>): List<Album> {
     val videos = items.filter { it.type == MediaType.VIDEO }
     if (photos.isNotEmpty()) albums += Album(GalleryViewModel.ALBUM_PHOTOS, "Photos", "${photos.size} photos", photos)
     if (videos.isNotEmpty()) albums += Album(GalleryViewModel.ALBUM_VIDEOS, "Videos", "${videos.size} videos", videos)
-
-    items.groupBy { monthKey(it.createdAtEpochMs) }
-        .toSortedMap(compareByDescending { it })
-        .forEach { (month, monthItems) ->
-            albums += Album(
-                id = GalleryViewModel.ALBUM_MONTH_PREFIX + month,
-                title = monthLabel(monthItems.first().createdAtEpochMs),
-                subtitle = "${monthItems.size} ${if (monthItems.size == 1) "item" else "items"}",
-                items = monthItems,
-            )
-        }
+    items.groupBy { monthKey(it.createdAtEpochMs) }.toSortedMap(compareByDescending { it }).forEach { (month, monthItems) ->
+        albums += Album(GalleryViewModel.ALBUM_MONTH_PREFIX + month, monthLabel(monthItems.first().createdAtEpochMs), "${monthItems.size} ${if (monthItems.size == 1) "item" else "items"}", monthItems)
+    }
     return albums
 }
 
@@ -294,29 +209,11 @@ private fun MediaRows(items: List<MediaItem>, state: GalleryUiState.Ready, viewM
 @Composable
 private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: GalleryViewModel, modifier: Modifier = Modifier) {
     LaunchedEffect(item.mediaId) { viewModel.loadThumbnail(item.mediaId) }
-    val bitmap = state.thumbnails[item.mediaId]
-        ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { viewModel.openMedia(item) },
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else if (item.mediaId in state.loadingThumbnails) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        } else {
-            Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
-        }
+    val bitmap = state.thumbnails[item.mediaId]?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    Box(modifier = modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surfaceVariant).clickable { viewModel.openMedia(item) }, contentAlignment = Alignment.Center) {
+        if (bitmap != null) Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else if (item.mediaId in state.loadingThumbnails) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        else Text(if (item.type == MediaType.VIDEO) "VIDEO" else "PHOTO", style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -328,29 +225,18 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
     val thumbnail = thumbnailBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     AlertDialog(
         onDismissRequest = viewModel::closeMedia,
-        confirmButton = {
-            TextButton(onClick = viewModel::closeMedia) { Text("Close") }
-        },
+        confirmButton = { TextButton(onClick = viewModel::closeMedia) { Text("Close") } },
         title = { Text(if (item.type == MediaType.VIDEO) "Video details" else "Photo details") },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
                     state.loadingContent -> CircularProgressIndicator()
-                    bitmap != null -> Image(
-                        bitmap,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                        contentScale = ContentScale.Fit,
-                    )
+                    bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
                     item.type == MediaType.VIDEO && thumbnail != null -> {
-                        Image(
-                            thumbnail,
-                            contentDescription = "Video preview",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                            contentScale = ContentScale.Fit,
-                        )
+                        Image(thumbnail, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
                         Text("Video preview", modifier = Modifier.padding(top = 8.dp))
                     }
+                    state.selectedError != null -> Text(state.selectedError, color = MaterialTheme.colorScheme.error)
                     else -> Text("Media preview is unavailable.")
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -367,26 +253,21 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
 
 @Composable
 private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 12.dp))
     }
 }
 
 private fun formatDuration(durationMs: Long): String {
-    val totalSeconds = (durationMs.coerceAtLeast(0L) / 1000L)
+    val totalSeconds = durationMs.coerceAtLeast(0L) / 1000L
     val hours = totalSeconds / 3600L
     val minutes = (totalSeconds % 3600L) / 60L
     val seconds = totalSeconds % 60L
-    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
-    else "%d:%02d".format(minutes, seconds)
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
 }
 
-private fun detailDateLabel(epochMs: Long): String =
-    SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMs))
+private fun detailDateLabel(epochMs: Long): String = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(epochMs))
 
 @Composable
 private fun CenteredMessage(padding: PaddingValues = PaddingValues(0.dp), content: @Composable () -> Unit) {
@@ -412,10 +293,8 @@ private fun dayLabel(epochMs: Long): String {
     }
 }
 
-private fun isSameDay(first: Calendar, second: Calendar): Boolean =
-    first.get(Calendar.ERA) == second.get(Calendar.ERA) &&
-        first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
-        first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
+private fun isSameDay(a: Calendar, b: Calendar): Boolean = a.get(Calendar.ERA) == b.get(Calendar.ERA) && a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
 
 private fun monthKey(epochMs: Long): String = SimpleDateFormat("yyyy-MM", Locale.ROOT).format(Date(epochMs))
+
 private fun monthLabel(epochMs: Long): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(epochMs))
