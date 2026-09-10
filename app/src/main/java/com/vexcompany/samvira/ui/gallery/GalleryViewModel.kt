@@ -27,6 +27,7 @@ sealed interface GalleryUiState {
         val selected: MediaItem? = null,
         val selectedGrant: MediaViewGrant? = null,
         val selectedContent: ByteArray? = null,
+        val selectedError: String? = null,
         val loadingContent: Boolean = false,
         val searchQuery: String = "",
         val mode: GalleryMode = GalleryMode.GALLERY,
@@ -77,11 +78,8 @@ class GalleryViewModel(
                 }
                 is MediaResult.Failure -> {
                     val old = _uiState.value as? GalleryUiState.Ready
-                    if (old != null) {
-                        _uiState.value = old.copy(refreshing = false)
-                    } else {
-                        _uiState.value = GalleryUiState.Error(result.code, result.message)
-                    }
+                    if (old != null) _uiState.value = old.copy(refreshing = false)
+                    else _uiState.value = GalleryUiState.Error(result.code, result.message)
                 }
             }
         }
@@ -119,32 +117,44 @@ class GalleryViewModel(
     }
 
     fun openMedia(item: MediaItem) {
-        _uiState.updateReady { it.copy(selected = item, selectedGrant = null, selectedContent = null, loadingContent = true) }
+        _uiState.updateReady {
+            it.copy(selected = item, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = true)
+        }
         viewModelScope.launch {
             val session = sessionStore.load()
             val organizationId = (organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
             if (session == null || organizationId.isNullOrBlank()) {
-                _uiState.updateReady { it.copy(loadingContent = false) }
+                updateSelected(item.mediaId) { it.copy(loadingContent = false, selectedError = "Sign in and select an organization to view this media.") }
                 return@launch
             }
             when (val grant = mediaRepository.requestView(session.token, organizationId, item.mediaId)) {
                 is MediaResult.Success -> {
-                    _uiState.updateReady { it.copy(selectedGrant = grant.value) }
+                    updateSelected(item.mediaId) { it.copy(selectedGrant = grant.value) }
                     if (item.type == MediaType.VIDEO) {
-                        _uiState.updateReady { it.copy(loadingContent = false) }
+                        updateSelected(item.mediaId) { it.copy(loadingContent = false) }
                     } else {
                         when (val content = mediaRepository.fetchContent(session.token, organizationId, item.mediaId, grant.value.accessToken)) {
-                            is MediaResult.Success -> _uiState.updateReady { it.copy(selectedContent = content.value, loadingContent = false) }
-                            is MediaResult.Failure -> _uiState.updateReady { it.copy(loadingContent = false) }
+                            is MediaResult.Success -> updateSelected(item.mediaId) { it.copy(selectedContent = content.value, loadingContent = false) }
+                            is MediaResult.Failure -> updateSelected(item.mediaId) { it.copy(loadingContent = false, selectedError = content.message ?: "Media preview is unavailable.") }
                         }
                     }
                 }
-                is MediaResult.Failure -> _uiState.updateReady { it.copy(loadingContent = false) }
+                is MediaResult.Failure -> updateSelected(item.mediaId) {
+                    it.copy(loadingContent = false, selectedError = grant.message ?: "Media access is unavailable.")
+                }
             }
         }
     }
 
-    fun closeMedia() = _uiState.updateReady { it.copy(selected = null, selectedGrant = null, selectedContent = null, loadingContent = false) }
+    fun closeMedia() = _uiState.updateReady {
+        it.copy(selected = null, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = false)
+    }
+
+    private inline fun updateSelected(mediaId: String, transform: (GalleryUiState.Ready) -> GalleryUiState.Ready) {
+        _uiState.update { current ->
+            if (current is GalleryUiState.Ready && current.selected?.mediaId == mediaId) transform(current) else current
+        }
+    }
 
     private fun albumContains(albumId: String, items: List<MediaItem>): Boolean = when {
         albumId == ALBUM_PHOTOS -> items.any { it.type == MediaType.PHOTO }
