@@ -16,10 +16,12 @@ import com.vexcompany.samvira.domain.org.OrganizationSelectionStore
 import com.vexcompany.samvira.domain.org.OrganizationsResult
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 sealed interface SessionUi {
@@ -57,12 +59,13 @@ class HomeViewModel(
     init {
         viewModelScope.launch { loadIdentity() }
         viewModelScope.launch { refreshSession() }
+        viewModelScope.launch { monitorSessionExpiry() }
     }
 
     fun connect() {
         viewModelScope.launch {
             val generation = ++sessionGeneration
-            _uiState.update { it.copy(connecting = true, sessionState = SessionUi.Disconnected) }
+            _uiState.update { it.copy(connecting = true, sessionState = SessionUi.Disconnected, organizationsError = null) }
             when (val result = authRepository.establishSession()) {
                 is AuthResult.Success -> {
                     if (generation != sessionGeneration) return@launch
@@ -80,9 +83,13 @@ class HomeViewModel(
         sessionGeneration++
         viewModelScope.launch {
             authRepository.signOut()
-            organizationSelection.clear()
-            _uiState.update { it.copy(sessionState = SessionUi.Disconnected, organizations = emptyList(), selection = OrganizationSelection.None, organizationsError = null, contextError = null, connecting = false, contextLoading = false) }
+            clearSessionUi()
         }
+    }
+
+    fun refreshOrganizations() {
+        val generation = sessionGeneration
+        viewModelScope.launch { loadOrganizations(generation) }
     }
 
     fun selectOrganization(organization: Organization) {
@@ -99,7 +106,7 @@ class HomeViewModel(
                     if (result.error == OrganizationError.SESSION_REJECTED) {
                         authRepository.signOut()
                         sessionGeneration++
-                        _uiState.update { it.copy(contextLoading = false, contextError = null, selection = OrganizationSelection.None, sessionState = SessionUi.Disconnected, organizations = emptyList()) }
+                        clearSessionUi()
                     } else {
                         _uiState.update { it.copy(contextLoading = false, contextError = result.error, selection = OrganizationSelection.None) }
                     }
@@ -124,6 +131,18 @@ class HomeViewModel(
         }
     }
 
+    private suspend fun monitorSessionExpiry() {
+        while (viewModelScope.coroutineContext.isActive) {
+            delay(1_000)
+            val active = _uiState.value.sessionState as? SessionUi.Active ?: continue
+            if (active.expiresAtEpochMs <= System.currentTimeMillis()) {
+                sessionGeneration++
+                authRepository.signOut()
+                clearSessionUi()
+            }
+        }
+    }
+
     private suspend fun loadOrganizations(generation: Long = sessionGeneration) {
         if (generation != sessionGeneration) return
         _uiState.update { it.copy(organizationsLoading = true, organizationsError = null) }
@@ -134,9 +153,8 @@ class HomeViewModel(
             is OrganizationsResult.Failure -> if (generation == sessionGeneration) {
                 if (result.error == OrganizationError.SESSION_REJECTED) {
                     authRepository.signOut()
-                    organizationSelection.clear()
                     sessionGeneration++
-                    _uiState.update { it.copy(organizationsLoading = false, organizationsError = null, organizations = emptyList(), selection = OrganizationSelection.None, sessionState = SessionUi.Disconnected) }
+                    clearSessionUi()
                 } else {
                     _uiState.update { it.copy(organizationsLoading = false, organizationsError = result.error, organizations = emptyList()) }
                 }
@@ -150,6 +168,22 @@ class HomeViewModel(
             _uiState.update { it.copy(isLoading = false, identityProvisioned = true, installationId = identity.installationId, publicKeyFingerprint = fingerprint(identity.publicKeyPem)) }
         } catch (e: CancellationException) { throw e }
         catch (_: Throwable) { _uiState.update { it.copy(isLoading = false, error = "Identity unavailable. Please restart SAMVIRA.") } }
+    }
+
+    private fun clearSessionUi() {
+        organizationSelection.clear()
+        _uiState.update {
+            it.copy(
+                sessionState = SessionUi.Disconnected,
+                organizations = emptyList(),
+                selection = OrganizationSelection.None,
+                organizationsError = null,
+                contextError = null,
+                connecting = false,
+                organizationsLoading = false,
+                contextLoading = false,
+            )
+        }
     }
 
     private fun fingerprint(pem: String): String = MessageDigest.getInstance("SHA-256").digest(pem.toByteArray()).take(8).joinToString("") { "%02X".format(it.toInt() and 0xFF) }
