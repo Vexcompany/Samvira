@@ -156,7 +156,7 @@ class GalleryViewModel(
 
     override fun onCleared() {
         cancelContentJob()
-        thumbnailJobs.values.forEach(Job::cancel)
+        thumbnailJobs.values.forEach { it.cancel() }
         thumbnailJobs.clear()
         super.onCleared()
     }
