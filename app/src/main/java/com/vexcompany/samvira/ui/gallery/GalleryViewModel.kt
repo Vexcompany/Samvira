@@ -47,13 +47,15 @@ class GalleryViewModel(
     private val _uiState = MutableStateFlow<GalleryUiState>(GalleryUiState.Loading)
     val uiState: StateFlow<GalleryUiState> = _uiState.asStateFlow()
     private val thumbnailJobs = ConcurrentHashMap<String, Job>()
+    private var contentJob: Job? = null
 
     init { refresh() }
 
     fun refresh() {
+        cancelContentJob()
         val refreshing = _uiState.value is GalleryUiState.Ready
         _uiState.update { current ->
-            if (refreshing && current is GalleryUiState.Ready) current.copy(refreshing = true)
+            if (refreshing && current is GalleryUiState.Ready) current.copy(refreshing = true, selected = null, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = false)
             else GalleryUiState.Loading
         }
         viewModelScope.launch {
@@ -117,10 +119,11 @@ class GalleryViewModel(
     }
 
     fun openMedia(item: MediaItem) {
+        cancelContentJob()
         _uiState.updateReady {
             it.copy(selected = item, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = true)
         }
-        viewModelScope.launch {
+        contentJob = viewModelScope.launch {
             val session = sessionStore.load()
             val organizationId = (organizationSelection.selection.value as? OrganizationSelection.Selected)?.organization?.id
             if (session == null || organizationId.isNullOrBlank()) {
@@ -144,8 +147,23 @@ class GalleryViewModel(
         }
     }
 
-    fun closeMedia() = _uiState.updateReady {
-        it.copy(selected = null, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = false)
+    fun closeMedia() {
+        cancelContentJob()
+        _uiState.updateReady {
+            it.copy(selected = null, selectedGrant = null, selectedContent = null, selectedError = null, loadingContent = false)
+        }
+    }
+
+    override fun onCleared() {
+        cancelContentJob()
+        thumbnailJobs.values.forEach(Job::cancel)
+        thumbnailJobs.clear()
+        super.onCleared()
+    }
+
+    private fun cancelContentJob() {
+        contentJob?.cancel()
+        contentJob = null
     }
 
     private inline fun updateSelected(mediaId: String, transform: (GalleryUiState.Ready) -> GalleryUiState.Ready) {
