@@ -130,12 +130,10 @@ class GalleryViewModel(
             when (val grant = mediaRepository.requestView(session.token, organizationId, item.mediaId)) {
                 is MediaResult.Success -> {
                     updateSelected(item.mediaId) { it.copy(selectedGrant = grant.value) }
-                    if (item.type == MediaType.VIDEO) {
-                        updateSelected(item.mediaId) { it.copy(loadingContent = false) }
-                    } else {
-                        when (val content = mediaRepository.fetchContent(session.token, organizationId, item.mediaId, grant.value.accessToken)) {
-                            is MediaResult.Success -> updateSelected(item.mediaId) { it.copy(selectedContent = content.value, loadingContent = false) }
-                            is MediaResult.Failure -> updateSelected(item.mediaId) { it.copy(loadingContent = false, selectedError = content.message ?: "Media preview is unavailable.") }
+                    when (val content = mediaRepository.fetchContent(session.token, organizationId, item.mediaId, grant.value.accessToken)) {
+                        is MediaResult.Success -> updateSelected(item.mediaId) { it.copy(selectedContent = content.value, loadingContent = false) }
+                        is MediaResult.Failure -> updateSelected(item.mediaId) {
+                            it.copy(loadingContent = false, selectedError = content.message ?: if (item.type == MediaType.VIDEO) "Video playback is unavailable." else "Media preview is unavailable.")
                         }
                     }
                 }
