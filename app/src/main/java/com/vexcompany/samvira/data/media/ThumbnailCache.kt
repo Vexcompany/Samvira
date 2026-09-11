@@ -38,15 +38,16 @@ class ThumbnailCache(context: Context) {
     }
 
     private fun trimIfNeeded(incomingBytes: Long, replacingFile: File) {
-        val files = directory.listFiles()?.filter { it.isFile && it != replacingFile && !it.name.endsWith(".tmp") }.orEmpty()
-        var total = files.sumOf { it.length() } + if (replacingFile.isFile) replacingFile.length() else 0L
-        if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L <= MAX_CACHE_BYTES) return
+        val replacementSize = if (replacingFile.isFile) replacingFile.length() else 0L
+        val files = directory.listFiles()?.filter { it.isFile && it != replacingFile && !it.name.contains(".tmp-") }.orEmpty()
+        var total = files.sumOf { it.length() } + replacementSize
+        if (total + incomingBytes - replacementSize <= MAX_CACHE_BYTES) return
         files.sortedBy { it.lastModified() }.forEach { file ->
-            if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L <= MAX_CACHE_BYTES) return
+            if (total + incomingBytes - replacementSize <= MAX_CACHE_BYTES) return
             total -= file.length()
             file.delete()
         }
-        if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L > MAX_CACHE_BYTES && replacingFile.isFile) {
+        if (total + incomingBytes - replacementSize > MAX_CACHE_BYTES && replacingFile.isFile) {
             replacingFile.delete()
         }
     }
