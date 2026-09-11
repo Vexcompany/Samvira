@@ -10,25 +10,44 @@ class ThumbnailCache(context: Context) {
 
     fun read(organizationId: String, mediaId: String): ByteArray? {
         val file = fileFor(organizationId, mediaId)
-        return if (file.isFile && file.length() <= MAX_ENTRY_BYTES) runCatching { file.readBytes() }.getOrNull() else null
+        if (!file.isFile) return null
+        if (file.length() > MAX_ENTRY_BYTES) {
+            runCatching { file.delete() }
+            return null
+        }
+        return runCatching {
+            val bytes = file.readBytes()
+            file.setLastModified(System.currentTimeMillis())
+            bytes
+        }.getOrNull()
     }
 
     fun write(organizationId: String, mediaId: String, bytes: ByteArray) {
         if (bytes.isEmpty() || bytes.size > MAX_ENTRY_BYTES) return
         runCatching {
-            trimIfNeeded(bytes.size.toLong())
-            fileFor(organizationId, mediaId).writeBytes(bytes)
+            val target = fileFor(organizationId, mediaId)
+            trimIfNeeded(bytes.size.toLong(), target)
+            val temporary = File(directory, "${target.name}.tmp-${Thread.currentThread().id}")
+            temporary.writeBytes(bytes)
+            if (!temporary.renameTo(target)) {
+                temporary.delete()
+                target.writeBytes(bytes)
+            }
+            target.setLastModified(System.currentTimeMillis())
         }
     }
 
-    private fun trimIfNeeded(incomingBytes: Long) {
-        val files = directory.listFiles()?.filter { it.isFile }.orEmpty()
-        var total = files.sumOf { it.length() }
-        if (total + incomingBytes <= MAX_CACHE_BYTES) return
+    private fun trimIfNeeded(incomingBytes: Long, replacingFile: File) {
+        val files = directory.listFiles()?.filter { it.isFile && it != replacingFile && !it.name.endsWith(".tmp") }.orEmpty()
+        var total = files.sumOf { it.length() } + if (replacingFile.isFile) replacingFile.length() else 0L
+        if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L <= MAX_CACHE_BYTES) return
         files.sortedBy { it.lastModified() }.forEach { file ->
-            if (total + incomingBytes <= MAX_CACHE_BYTES) return
+            if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L <= MAX_CACHE_BYTES) return
             total -= file.length()
             file.delete()
+        }
+        if (total + incomingBytes - if (replacingFile.isFile) replacingFile.length() else 0L > MAX_CACHE_BYTES && replacingFile.isFile) {
+            replacingFile.delete()
         }
     }
 
