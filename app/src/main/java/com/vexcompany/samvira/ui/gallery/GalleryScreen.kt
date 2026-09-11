@@ -2,6 +2,8 @@ package com.vexcompany.samvira.ui.gallery
 
 import android.app.Activity
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.view.ViewGroup
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +39,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +48,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem as PlayerMediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ByteArrayDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.PlayerView
 import com.vexcompany.samvira.domain.media.MediaItem
 import com.vexcompany.samvira.domain.media.MediaType
 import com.vexcompany.samvira.security.ScreenGuard
@@ -218,9 +229,10 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
 }
 
 @Composable
+@OptIn(UnstableApi::class)
 private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, viewModel: GalleryViewModel) {
     val bytes = state.selectedContent
-    val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+    val bitmap = bytes?.takeIf { item.type == MediaType.PHOTO }?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     val thumbnailBytes = state.thumbnails[item.mediaId]
     val thumbnail = thumbnailBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
     AlertDialog(
@@ -231,6 +243,7 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 when {
                     state.loadingContent -> CircularProgressIndicator()
+                    item.type == MediaType.VIDEO && bytes != null -> VideoPlayer(bytes, item.mediaId)
                     bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
                     item.type == MediaType.VIDEO && thumbnail != null -> {
                         Image(thumbnail, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
@@ -248,6 +261,36 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                 DetailRow("Media ID", item.mediaId)
             }
         },
+    )
+}
+
+@Composable
+@OptIn(UnstableApi::class)
+private fun VideoPlayer(bytes: ByteArray, mediaId: String) {
+    val context = LocalContext.current
+    val player = remember(bytes, mediaId) {
+        ExoPlayer.Builder(context).build().apply {
+            val dataSourceFactory = DataSource.Factory { ByteArrayDataSource(bytes) }
+            val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(PlayerMediaItem.fromUri(Uri.parse("samvira://media/$mediaId")))
+            setMediaSource(mediaSource)
+            playWhenReady = true
+            prepare()
+        }
+    }
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+    AndroidView(
+        factory = { viewContext ->
+            PlayerView(viewContext).apply {
+                this.player = player
+                useController = true
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+        },
+        update = { it.player = player },
+        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
     )
 }
 
