@@ -252,6 +252,12 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                     state.selectedError != null -> Text(state.selectedError, color = MaterialTheme.colorScheme.error)
                     else -> Text("Media preview is unavailable.")
                 }
+                if (state.selectedError != null) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(state.selectedError, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                        TextButton(onClick = viewModel::retrySelected) { Text("Retry") }
+                    }
+                }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                 DetailRow("Type", if (item.type == MediaType.VIDEO) "Video" else "Photo")
                 DetailRow("Format", item.mimeType)
