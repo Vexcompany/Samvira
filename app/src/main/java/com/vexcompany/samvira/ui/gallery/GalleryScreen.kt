@@ -249,7 +249,6 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
                         Image(thumbnail, contentDescription = "Video preview", modifier = Modifier.fillMaxWidth().aspectRatio(1f), contentScale = ContentScale.Fit)
                         Text("Video preview", modifier = Modifier.padding(top = 8.dp))
                     }
-                    state.selectedError != null -> Text(state.selectedError, color = MaterialTheme.colorScheme.error)
                     else -> Text("Media preview is unavailable.")
                 }
                 if (state.selectedError != null) {
