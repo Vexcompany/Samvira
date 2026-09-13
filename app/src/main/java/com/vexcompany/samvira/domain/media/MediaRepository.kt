@@ -2,7 +2,11 @@ package com.vexcompany.samvira.domain.media
 
 sealed interface MediaResult<out T> {
     data class Success<T>(val value: T) : MediaResult<T>
-    data class Failure(val code: String, val message: String? = null) : MediaResult<Nothing>
+    data class Failure(
+        val code: String,
+        val message: String? = null,
+        val httpStatus: Int? = null,
+    ) : MediaResult<Nothing>
 }
 
 interface MediaRepository {
