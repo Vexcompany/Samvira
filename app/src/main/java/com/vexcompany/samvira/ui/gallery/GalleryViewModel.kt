@@ -175,17 +175,7 @@ class GalleryViewModel(
     ) {
         if (grant.expiresAtEpochMs <= System.currentTimeMillis()) {
             if (allowRefresh) {
-                when (val refreshed = mediaRepository.requestView(sessionToken, organizationId, item.mediaId)) {
-                    is MediaResult.Success -> {
-                        if (refreshed.value.mediaId != item.mediaId || refreshed.value.mediaType != item.type) {
-                            showSelectedError(item, "Media access data is invalid.")
-                        } else {
-                            updateSelected(item.mediaId) { it.copy(selectedGrant = refreshed.value) }
-                            loadSelectedContent(sessionToken, organizationId, item, refreshed.value, allowRefresh = false)
-                        }
-                    }
-                    is MediaResult.Failure -> showSelectedError(item, refreshed.message ?: "Media access has expired.")
-                }
+                refreshGrantAndLoad(sessionToken, organizationId, item)
             } else {
                 showSelectedError(item, "Media access has expired.")
             }
@@ -195,24 +185,31 @@ class GalleryViewModel(
         when (val content = mediaRepository.fetchContent(sessionToken, organizationId, item.mediaId, grant.accessToken)) {
             is MediaResult.Success -> updateSelected(item.mediaId) { it.copy(selectedContent = content.value, loadingContent = false) }
             is MediaResult.Failure -> {
-                if (allowRefresh && grant.expiresAtEpochMs <= System.currentTimeMillis()) {
-                    when (val refreshed = mediaRepository.requestView(sessionToken, organizationId, item.mediaId)) {
-                        is MediaResult.Success -> {
-                            if (refreshed.value.mediaId != item.mediaId || refreshed.value.mediaType != item.type) {
-                                showSelectedError(item, "Media access data is invalid.")
-                            } else {
-                                updateSelected(item.mediaId) { it.copy(selectedGrant = refreshed.value) }
-                                loadSelectedContent(sessionToken, organizationId, item, refreshed.value, allowRefresh = false)
-                            }
-                        }
-                        is MediaResult.Failure -> showSelectedError(item, content.message ?: "Media preview is unavailable.")
-                    }
+                if (allowRefresh && isStaleViewGrantFailure(content)) {
+                    refreshGrantAndLoad(sessionToken, organizationId, item)
                 } else {
                     showSelectedError(item, content.message ?: if (item.type == MediaType.VIDEO) "Video playback is unavailable." else "Media preview is unavailable.")
                 }
             }
         }
     }
+
+    private suspend fun refreshGrantAndLoad(sessionToken: String, organizationId: String, item: MediaItem) {
+        when (val refreshed = mediaRepository.requestView(sessionToken, organizationId, item.mediaId)) {
+            is MediaResult.Success -> {
+                if (refreshed.value.mediaId != item.mediaId || refreshed.value.mediaType != item.type) {
+                    showSelectedError(item, "Media access data is invalid.")
+                } else {
+                    updateSelected(item.mediaId) { it.copy(selectedGrant = refreshed.value, selectedError = null, loadingContent = true) }
+                    loadSelectedContent(sessionToken, organizationId, item, refreshed.value, allowRefresh = false)
+                }
+            }
+            is MediaResult.Failure -> showSelectedError(item, refreshed.message ?: "Media access is unavailable.")
+        }
+    }
+
+    private fun isStaleViewGrantFailure(result: MediaResult.Failure): Boolean =
+        result.httpStatus == 401 || result.httpStatus == 403
 
     private fun showSelectedError(item: MediaItem, message: String) {
         updateSelected(item.mediaId) { it.copy(loadingContent = false, selectedError = message) }
