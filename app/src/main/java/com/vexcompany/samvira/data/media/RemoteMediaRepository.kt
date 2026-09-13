@@ -15,13 +15,13 @@ class RemoteMediaRepository(
 ) : MediaRepository {
     override suspend fun listMedia(sessionToken: String, organizationId: String): MediaResult<List<MediaItem>> = when (val result = remoteClient.listMedia(sessionToken, organizationId)) {
         is ApiResult.Success -> MediaResult.Success(result.value.media.map(::toDomain))
-        is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+        is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message, result.httpStatus)
         is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
     }
 
     override suspend fun requestView(sessionToken: String, organizationId: String, mediaId: String): MediaResult<MediaViewGrant> = when (val result = remoteClient.requestMediaView(sessionToken, organizationId, mediaId)) {
         is ApiResult.Success -> MediaResult.Success(MediaViewGrant(result.value.media_id, toDomainType(result.value.type), result.value.mime_type, result.value.expires_at_epoch_ms, result.value.content_url, result.value.access_token))
-        is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+        is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message, result.httpStatus)
         is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
     }
 
@@ -32,7 +32,7 @@ class RemoteMediaRepository(
                 thumbnailCache.write(organizationId, mediaId, result.value)
                 MediaResult.Success(result.value)
             }
-            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message, result.httpStatus)
             is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
         }
     }
@@ -40,7 +40,7 @@ class RemoteMediaRepository(
     override suspend fun fetchContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): MediaResult<ByteArray> =
         when (val result = remoteClient.fetchMediaContent(sessionToken, organizationId, mediaId, viewToken)) {
             is ApiResult.Success -> MediaResult.Success(result.value)
-            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message)
+            is ApiResult.ApiError -> MediaResult.Failure(result.code, result.message, result.httpStatus)
             is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
         }
 
