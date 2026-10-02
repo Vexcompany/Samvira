@@ -30,6 +30,7 @@ fun SamviraNavHost(
                     authRepository = container.authRepository,
                     organizationRepository = container.organizationRepository,
                     organizationSelection = container.organizationSelection,
+                    mediaRepository = container.mediaRepository,
                 )
             }
             HomeScreen(
