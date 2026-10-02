@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -151,7 +150,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
     val groups = items.groupBy { dayKey(it.createdAtEpochMs) }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         groups.forEach { (day, dayItems) ->
-            stickyHeader(key = "timeline-header-$day") { TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size) }
+            item(key = "timeline-header-$day") { TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size) }
             item(key = "timeline-media-$day") {
                 Column(modifier = Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     dayItems.chunked(3).forEach { rowItems ->
