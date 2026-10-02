@@ -98,6 +98,20 @@ class GalleryViewModel(
 
     fun setAlbum(albumId: String?) = _uiState.updateReady { it.copy(selectedAlbumId = albumId) }
 
+    /** Drops sensitive in-memory media when the gallery is no longer visible. */
+    fun onViewerHidden() {
+        cancelContentJob()
+        _uiState.updateReady {
+            it.copy(
+                selected = null,
+                selectedGrant = null,
+                selectedContent = null,
+                selectedError = null,
+                loadingContent = false,
+            )
+        }
+    }
+
     fun loadThumbnail(mediaId: String) {
         val state = _uiState.value as? GalleryUiState.Ready ?: return
         if (state.thumbnails.containsKey(mediaId) || thumbnailJobs.containsKey(mediaId)) return
