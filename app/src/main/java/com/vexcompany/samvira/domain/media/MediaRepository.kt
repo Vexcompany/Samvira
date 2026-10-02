@@ -14,6 +14,9 @@ interface MediaRepository {
     suspend fun requestView(sessionToken: String, organizationId: String, mediaId: String): MediaResult<MediaViewGrant>
     suspend fun fetchThumbnail(sessionToken: String, organizationId: String, mediaId: String): MediaResult<ByteArray>
     suspend fun fetchContent(sessionToken: String, organizationId: String, mediaId: String, viewToken: String): MediaResult<ByteArray>
+
+    /** Removes locally cached thumbnails when the authenticated context ends. */
+    fun clearCachedMedia()
 }
 
 data class MediaViewGrant(
