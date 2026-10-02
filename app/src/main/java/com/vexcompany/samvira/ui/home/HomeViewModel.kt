@@ -2,7 +2,6 @@ package com.vexcompany.samvira.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vexcompany.samvira.data.auth.SessionStore
 import com.vexcompany.samvira.domain.auth.AuthError
 import com.vexcompany.samvira.domain.auth.AuthRepository
 import com.vexcompany.samvira.domain.auth.AuthResult
