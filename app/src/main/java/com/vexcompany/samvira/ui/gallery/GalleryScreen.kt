@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -68,9 +69,21 @@ import java.util.Locale
 @Composable
 fun GalleryScreen(viewModel: GalleryViewModel) {
     val context = LocalContext.current
-    DisposableEffect(context) {
-        (context as? Activity)?.let(ScreenGuard::enable)
-        onDispose { (context as? Activity)?.let(ScreenGuard::disable) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(context, lifecycleOwner, viewModel) {
+        val activity = context as? Activity
+        activity?.let(ScreenGuard::enable)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                viewModel.onViewerHidden()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            activity?.let(ScreenGuard::disable)
+            viewModel.onViewerHidden()
+        }
     }
     val state by viewModel.uiState.collectAsState()
     when (val currentState = state) {
