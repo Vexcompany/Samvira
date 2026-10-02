@@ -244,7 +244,7 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
 }
 
 @Composable
-@OptIn(UnstableApi::class)
+@UnstableApi
 private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, viewModel: GalleryViewModel) {
     val bytes = state.selectedContent
     val bitmap = bytes?.takeIf { item.type == MediaType.PHOTO }?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
@@ -285,7 +285,7 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
 }
 
 @Composable
-@OptIn(UnstableApi::class)
+@UnstableApi
 private fun VideoPlayer(bytes: ByteArray, mediaId: String) {
     val context = LocalContext.current
     val player = remember(bytes, mediaId) {
