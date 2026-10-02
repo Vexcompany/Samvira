@@ -2,6 +2,7 @@ package com.vexcompany.samvira.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,6 +19,7 @@ object Routes {
 }
 
 @Composable
+@UnstableApi
 fun SamviraNavHost(
     container: AppContainer,
     navController: NavHostController = rememberNavController(),
