@@ -98,4 +98,4 @@ Before declaring a milestone complete:
 
 Act as a senior Android/security-conscious product engineer. Do not merely generate snippets: inspect the repository, implement changes directly, test them, and leave a coherent, auditable state. When ambiguity exists, choose the smallest reversible design and document it.
 
-**Current target:** Milestone 0.6 — Gallery / Timeline / Album Experience.
+**Current target:** Milestone 0.6.8 — Production hardening of the gallery/viewer lifecycle, cache lifecycle, authorization edge cases, and performance/error resilience.

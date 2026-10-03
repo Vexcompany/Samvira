@@ -1,7 +1,7 @@
 package com.vexcompany.samvira.ui.gallery
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class GalleryViewModelStateTest {
     @Test
@@ -11,6 +11,9 @@ class GalleryViewModelStateTest {
 
     @Test
     fun galleryModesRemainStable() {
-        assertEquals(listOf(GalleryMode.GALLERY, GalleryMode.TIMELINE, GalleryMode.ALBUMS), GalleryMode.entries)
+        assertEquals(
+            listOf(GalleryMode.GALLERY, GalleryMode.TIMELINE, GalleryMode.ALBUMS),
+            GalleryMode.entries,
+        )
     }
 }

@@ -7,6 +7,7 @@ import com.vexcompany.samvira.domain.auth.AuthRepository
 import com.vexcompany.samvira.domain.auth.AuthResult
 import com.vexcompany.samvira.domain.auth.SessionState
 import com.vexcompany.samvira.domain.identity.InstallationIdentityRepository
+import com.vexcompany.samvira.domain.media.MediaRepository
 import com.vexcompany.samvira.domain.org.Organization
 import com.vexcompany.samvira.domain.org.OrganizationContextResult
 import com.vexcompany.samvira.domain.org.OrganizationError
@@ -51,6 +52,7 @@ class HomeViewModel(
     private val authRepository: AuthRepository,
     private val organizationRepository: OrganizationRepository,
     private val organizationSelection: OrganizationSelectionStore,
+    private val mediaRepository: MediaRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -81,6 +83,7 @@ class HomeViewModel(
 
     fun signOut() {
         sessionGeneration++
+        mediaRepository.clearCachedMedia()
         viewModelScope.launch {
             authRepository.signOut()
             clearSessionUi()
@@ -98,6 +101,7 @@ class HomeViewModel(
             _uiState.update { it.copy(contextLoading = true, contextError = null) }
             when (val result = organizationRepository.organizationContext(organization.id)) {
                 is OrganizationContextResult.Success -> if (generation == sessionGeneration) {
+                    mediaRepository.clearCachedMedia()
                     organizationSelection.select(result.organization)
                     _uiState.update { it.copy(contextLoading = false, selection = OrganizationSelection.Selected(result.organization)) }
                 }
@@ -117,6 +121,7 @@ class HomeViewModel(
 
     fun clearSelection() {
         organizationSelection.clear()
+        mediaRepository.clearCachedMedia()
         _uiState.update { it.copy(selection = OrganizationSelection.None, contextError = null) }
     }
 
@@ -137,6 +142,7 @@ class HomeViewModel(
             val active = _uiState.value.sessionState as? SessionUi.Active ?: continue
             if (active.expiresAtEpochMs <= System.currentTimeMillis()) {
                 sessionGeneration++
+                mediaRepository.clearCachedMedia()
                 authRepository.signOut()
                 clearSessionUi()
             }
@@ -154,6 +160,7 @@ class HomeViewModel(
                 if (result.error == OrganizationError.SESSION_REJECTED) {
                     authRepository.signOut()
                     sessionGeneration++
+                    mediaRepository.clearCachedMedia()
                     clearSessionUi()
                 } else {
                     _uiState.update { it.copy(organizationsLoading = false, organizationsError = result.error, organizations = emptyList()) }
@@ -171,6 +178,7 @@ class HomeViewModel(
     }
 
     private fun clearSessionUi() {
+        mediaRepository.clearCachedMedia()
         organizationSelection.clear()
         _uiState.update {
             it.copy(

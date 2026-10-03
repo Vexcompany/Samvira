@@ -46,9 +46,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem as PlayerMediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.ByteArrayDataSource
@@ -65,12 +68,25 @@ import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
+@UnstableApi
 @Composable
 fun GalleryScreen(viewModel: GalleryViewModel) {
     val context = LocalContext.current
-    DisposableEffect(context) {
-        (context as? Activity)?.let(ScreenGuard::enable)
-        onDispose { (context as? Activity)?.let(ScreenGuard::disable) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(context, lifecycleOwner, viewModel) {
+        val activity = context as? Activity
+        activity?.let(ScreenGuard::enable)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                viewModel.onViewerHidden()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            activity?.let(ScreenGuard::disable)
+            viewModel.onViewerHidden()
+        }
     }
     val state by viewModel.uiState.collectAsState()
     when (val currentState = state) {
@@ -135,7 +151,7 @@ private fun Timeline(items: List<MediaItem>, state: GalleryUiState.Ready, paddin
     val groups = items.groupBy { dayKey(it.createdAtEpochMs) }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         groups.forEach { (day, dayItems) ->
-            androidx.compose.foundation.lazy.stickyHeader(key = "timeline-header-$day") { TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size) }
+            item(key = "timeline-header-$day") { TimelineHeader(dayItems.first().createdAtEpochMs, dayItems.size) }
             item(key = "timeline-media-$day") {
                 Column(modifier = Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     dayItems.chunked(3).forEach { rowItems ->
@@ -229,7 +245,7 @@ private fun MediaTile(item: MediaItem, state: GalleryUiState.Ready, viewModel: G
 }
 
 @Composable
-@OptIn(UnstableApi::class)
+@UnstableApi
 private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, viewModel: GalleryViewModel) {
     val bytes = state.selectedContent
     val bitmap = bytes?.takeIf { item.type == MediaType.PHOTO }?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
@@ -270,7 +286,7 @@ private fun MediaDetailDialog(state: GalleryUiState.Ready, item: MediaItem, view
 }
 
 @Composable
-@OptIn(UnstableApi::class)
+@UnstableApi
 private fun VideoPlayer(bytes: ByteArray, mediaId: String) {
     val context = LocalContext.current
     val player = remember(bytes, mediaId) {

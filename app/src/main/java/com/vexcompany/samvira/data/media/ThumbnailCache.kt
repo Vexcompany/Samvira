@@ -11,7 +11,7 @@ class ThumbnailCache(context: Context) {
     fun read(organizationId: String, mediaId: String): ByteArray? {
         val file = fileFor(organizationId, mediaId)
         if (!file.isFile) return null
-        if (file.length() > MAX_ENTRY_BYTES) {
+        if (file.length() > MAX_ENTRY_BYTES || isExpired(file)) {
             runCatching { file.delete() }
             return null
         }
@@ -25,6 +25,7 @@ class ThumbnailCache(context: Context) {
     fun write(organizationId: String, mediaId: String, bytes: ByteArray) {
         if (bytes.isEmpty() || bytes.size > MAX_ENTRY_BYTES) return
         runCatching {
+            pruneExpired()
             val target = fileFor(organizationId, mediaId)
             trimIfNeeded(bytes.size.toLong(), target)
             val temporary = File(directory, "${target.name}.tmp-${Thread.currentThread().id}")
@@ -36,6 +37,25 @@ class ThumbnailCache(context: Context) {
             target.setLastModified(System.currentTimeMillis())
         }
     }
+
+    fun clear() {
+        runCatching {
+            directory.listFiles()?.forEach { file ->
+                if (file.isFile) file.delete()
+            }
+        }
+    }
+
+    private fun pruneExpired() {
+        directory.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.contains(".tmp-") || isExpired(file))) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+
+    private fun isExpired(file: File): Boolean =
+        file.lastModified() <= 0L || System.currentTimeMillis() - file.lastModified() > CACHE_TTL_MS
 
     private fun trimIfNeeded(incomingBytes: Long, replacingFile: File) {
         val replacementSize = if (replacingFile.isFile) replacingFile.length() else 0L
@@ -52,7 +72,8 @@ class ThumbnailCache(context: Context) {
         }
     }
 
-    private fun fileFor(organizationId: String, mediaId: String): File = File(directory, sha256("$organizationId\u0000$mediaId"))
+    private fun fileFor(organizationId: String, mediaId: String): File =
+        File(directory, sha256("$organizationId\u0000$mediaId"))
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
@@ -61,5 +82,6 @@ class ThumbnailCache(context: Context) {
     private companion object {
         const val MAX_ENTRY_BYTES = 5L * 1024L * 1024L
         const val MAX_CACHE_BYTES = 64L * 1024L * 1024L
+        const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
     }
 }
