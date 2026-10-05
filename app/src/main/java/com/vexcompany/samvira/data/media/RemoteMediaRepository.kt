@@ -44,6 +44,10 @@ class RemoteMediaRepository(
             is ApiResult.NetworkError -> MediaResult.Failure("NETWORK_ERROR")
         }
 
+    override fun clearCachedMedia() {
+        thumbnailCache.clear()
+    }
+
     private fun toDomain(dto: com.vexcompany.samvira.data.remote.MediaItemDto) = MediaItem(dto.media_id, dto.organization_id, toDomainType(dto.type), dto.mime_type, dto.width, dto.height, dto.duration_ms, dto.created_at_epoch_ms, dto.thumbnail_url)
     private fun toDomainType(type: MediaTypeDto) = when (type) { MediaTypeDto.PHOTO -> MediaType.PHOTO; MediaTypeDto.VIDEO -> MediaType.VIDEO }
 }
