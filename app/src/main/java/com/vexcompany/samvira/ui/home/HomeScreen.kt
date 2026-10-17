@@ -33,7 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
 import com.vexcompany.samvira.domain.auth.AuthError
 import com.vexcompany.samvira.domain.org.MembershipState
 import com.vexcompany.samvira.domain.org.Organization
