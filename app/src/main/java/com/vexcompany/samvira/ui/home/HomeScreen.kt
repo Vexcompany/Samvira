@@ -47,7 +47,7 @@ import java.util.Date
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(viewModel: HomeViewModel, onOpenGallery: () -> Unit = {}) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsState()
     HomeContent(
         state = uiState,
         onConnect = viewModel::connect,
